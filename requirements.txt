@@ -1,0 +1,6 @@
+ultralytics==8.3.40
+torch>=2.2,<3
+torchvision>=0.17,<1
+opencv-python>=4.9,<5
+numpy>=1.26,<3
+Pillow>=10

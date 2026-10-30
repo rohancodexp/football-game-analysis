@@ -1,0 +1,1 @@
+{"players": [{"player_id":"HOME_10","team_id":"HOME","jersey":10,"active_from":0,"active_to":6060},{"player_id":"AWAY_10","team_id":"AWAY","jersey":10,"active_from":0,"active_to":6060}],"seeds": {"HOME_10":["references/home_10.jpg"],"AWAY_10":["references/away_10.jpg"]}}
