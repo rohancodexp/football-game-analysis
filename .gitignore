@@ -20,6 +20,10 @@ datasets/
 # Generated results
 results/
 
+# Private match metadata and reference crops
+roster.json
+references/
+
 # IDE and OS
 .vscode/
 .idea/
