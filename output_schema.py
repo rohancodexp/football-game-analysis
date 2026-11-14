@@ -24,6 +24,26 @@ from typing import Any, Iterable, Iterator, Optional, Sequence
 
 SCHEMA_VERSION = "1.0"
 
+# Per-frame detection accounting (Stage 2). A separate version and file from the
+# detection/identity contract above; it never carries identity fields.
+ACCOUNTING_VERSION = "1.0"
+
+ACCOUNTING_FIELDS: tuple[str, ...] = (
+    "frame",
+    "timestamp_s",
+    "raw_detections",
+    "raw_high_conf",
+    "raw_low_conf",
+    "raw_below_low",
+    "emitted_detections",
+    "dropped_detections",
+    "tracker_update_skipped",
+    "tracker_frame_id",
+    "active_tracks",
+    "lost_tracks",
+    "emitted_track_ids",
+)
+
 # --- Team vocabulary -------------------------------------------------------
 
 TEAM_A = "TEAM_A"
@@ -583,6 +603,147 @@ def validate_crop_index_samples(
         "detection_id": detection_id_accounting(
             [s for s in samples if isinstance(s, dict)]
         ),
+    }
+
+
+def validate_accounting_record(
+    record: Any,
+    *,
+    context: str = "record",
+    previous_tracker_frame_id: Optional[int] = None,
+) -> list[str]:
+    """Structural and arithmetic checks for one ``detection_accounting.jsonl`` record.
+
+    Returns a list of errors; empty means the record is internally consistent.
+    """
+    errors: list[str] = []
+    if not isinstance(record, dict):
+        return [f"{context}: accounting record must be an object"]
+
+    for field in ACCOUNTING_FIELDS:
+        if field not in record:
+            errors.append(f"{context}: missing field {field}")
+
+    def _count(name: str) -> Optional[int]:
+        value = record.get(name)
+        if isinstance(value, bool) or not isinstance(value, int):
+            errors.append(f"{context}: {name} must be an int, got {value!r}")
+            return None
+        if value < 0:
+            errors.append(f"{context}: {name} must be >= 0, got {value}")
+            return None
+        return value
+
+    frame = _count("frame")
+    raw = _count("raw_detections")
+    high = _count("raw_high_conf")
+    low = _count("raw_low_conf")
+    below = _count("raw_below_low")
+    emitted = _count("emitted_detections")
+    dropped = _count("dropped_detections")
+    _count("tracker_frame_id")
+    _count("active_tracks")
+    _count("lost_tracks")
+
+    timestamp = record.get("timestamp_s")
+    if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
+        errors.append(f"{context}: timestamp_s must be a number, got {timestamp!r}")
+
+    skipped = record.get("tracker_update_skipped")
+    if not isinstance(skipped, bool):
+        errors.append(f"{context}: tracker_update_skipped must be a bool, got {skipped!r}")
+
+    ids = record.get("emitted_track_ids")
+    if not isinstance(ids, list):
+        errors.append(f"{context}: emitted_track_ids must be a list, got {ids!r}")
+        ids = None
+    if frame is not None and frame < 0:
+        errors.append(f"{context}: frame must be >= 0")
+
+    if raw is not None and high is not None and low is not None and below is not None:
+        if high + low + below != raw:
+            errors.append(f"{context}: confidence bands {high}+{low}+{below} != raw {raw}")
+    if emitted is not None and raw is not None and emitted > raw:
+        errors.append(f"{context}: emitted {emitted} exceeds raw {raw}")
+    if dropped is not None and raw is not None and emitted is not None:
+        if dropped != raw - emitted:
+            errors.append(f"{context}: dropped {dropped} != raw {raw} - emitted {emitted}")
+    if ids is not None and emitted is not None and len(ids) != emitted:
+        errors.append(f"{context}: emitted_track_ids has {len(ids)} entries, emitted_detections is {emitted}")
+    if ids is not None:
+        if any(isinstance(i, bool) or not isinstance(i, int) or i <= 0 for i in ids):
+            errors.append(f"{context}: emitted_track_ids must be positive ints")
+        if len(set(ids)) != len(ids):
+            errors.append(f"{context}: emitted_track_ids contains duplicates")
+    if isinstance(skipped, bool) and previous_tracker_frame_id is not None:
+        tracker_id = record.get("tracker_frame_id")
+        if isinstance(tracker_id, int):
+            if skipped != (tracker_id == previous_tracker_frame_id):
+                errors.append(
+                    f"{context}: tracker_update_skipped={skipped} but tracker_frame_id went "
+                    f"{previous_tracker_frame_id} -> {tracker_id}"
+                )
+    return errors
+
+
+def validate_accounting_rows(
+    rows: Sequence[dict[str, Any]],
+    *,
+    expected_frames: Optional[int] = None,
+    boxes_rows: Optional[int] = None,
+    identified_rows: Optional[int] = None,
+) -> dict[str, Any]:
+    """Validate a whole ``detection_accounting.jsonl`` file: structure, sequencing and totals."""
+    errors: list[str] = []
+    totals = {"raw_detections": 0, "emitted_detections": 0, "dropped_detections": 0,
+              "raw_high_conf": 0, "raw_low_conf": 0, "raw_below_low": 0,
+              "frames_raw_zero": 0, "frames_with_drop": 0, "frames_tracker_update_skipped": 0}
+    previous_tracker_frame_id = 0
+    for index, record in enumerate(rows):
+        errors.extend(validate_accounting_record(
+            record, context=f"record {index}", previous_tracker_frame_id=previous_tracker_frame_id))
+        if not isinstance(record, dict):
+            continue
+        tracker_id = record.get("tracker_frame_id")
+        if isinstance(tracker_id, int):
+            previous_tracker_frame_id = tracker_id
+        frame = record.get("frame")
+        if frame != index:
+            errors.append(f"record {index}: frame is {frame!r}, expected {index} (records must be sequential)")
+        for key in ("raw_detections", "emitted_detections", "dropped_detections",
+                    "raw_high_conf", "raw_low_conf", "raw_below_low"):
+            value = record.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                totals[key] += value
+        raw = record.get("raw_detections")
+        if isinstance(raw, int) and raw == 0:
+            totals["frames_raw_zero"] += 1
+        dropped = record.get("dropped_detections")
+        if isinstance(dropped, int) and dropped > 0:
+            totals["frames_with_drop"] += 1
+        if record.get("tracker_update_skipped") is True:
+            totals["frames_tracker_update_skipped"] += 1
+
+    if expected_frames is not None and len(rows) != expected_frames:
+        errors.append(f"accounting has {len(rows)} records, expected one per processed frame ({expected_frames})")
+    if boxes_rows is not None and totals["emitted_detections"] != boxes_rows:
+        errors.append(f"emitted total {totals['emitted_detections']} != boxes.jsonl rows {boxes_rows}")
+    if identified_rows is not None and totals["emitted_detections"] != identified_rows:
+        errors.append(f"emitted total {totals['emitted_detections']} != identified_boxes.jsonl rows {identified_rows}")
+    if totals["dropped_detections"] != totals["raw_detections"] - totals["emitted_detections"]:
+        errors.append("aggregate dropped != raw - emitted")
+    if totals["frames_raw_zero"] != totals["frames_tracker_update_skipped"]:
+        errors.append(
+            f"frames with zero raw detections ({totals['frames_raw_zero']}) != frames where the "
+            f"tracker update was skipped ({totals['frames_tracker_update_skipped']})")
+
+    return {
+        "accounting_version": ACCOUNTING_VERSION,
+        "records": len(rows),
+        "valid": not errors,
+        "error_count": len(errors),
+        "errors": errors[:50],
+        "totals": totals,
     }
 
 

@@ -59,6 +59,29 @@ So `HOME`/`AWAY` never fail validation, never get rewritten, and are always repo
 
 **Validation** — `validate_rows(rows, strict=True|False)` and `validate_crop_index_samples(samples)` return `{valid, errors, warnings, detection_id}`. `strict=False` (required level) accepts pre-contract files and reports what normalization would change; `strict=True` demands a canonical ID, canonical-or-accepted team values, and no reserved fields. Note that a row without any `track_id` still fails strict validation for the missing field even though its ordinal-keyed `detection_id` is unique. Run `python -m unittest test_output_schema -v` after touching any writer or reader.
 
+## Detection accounting
+Every run writes a per-frame census of what the detector handed the tracker versus what the tracker returned. It is observation only: registering the accounting callback does not change detection, tracking, fragmentation, appearance sampling or resolution, and `boxes.jsonl` from an accounting run is byte-identical to the same run without it.
+
+**Where the counters sit.** `model.track(..., conf=.3, imgsz=960, classes=[0])` runs YOLOv8n, then NMS (conf gate 0.3, IoU 0.7, `max_det` 300, person-class filter) and produces `Results.boxes` in original frame coordinates. Ultralytics then runs its `on_predict_postprocess_end` callbacks in registration order; the ByteTrack association is one of them (`trackers/track.py`). `run.py` registers its accounting callback before the first `track()` call, so it reads `Results.boxes` at the last moment they are still the raw, pre-association detections — the same array the tracker is about to receive. Emitted counts come from the returned result. No inference is run twice.
+
+| term | meaning |
+|---|---|
+| raw detections | boxes after NMS and filtering, immediately before ByteTrack association |
+| emitted detections | tracker-returned boxes carrying a `track_id`; exactly the rows written to `boxes.jsonl` |
+| dropped detections | `raw - emitted`, a derived total with no per-detection cause |
+
+**Confidence bands** are mutually exclusive and use ByteTrack's own boundaries: `raw_high_conf` is `conf >= track_high_thresh` (0.25), `raw_low_conf` is `track_low_thresh < conf < track_high_thresh` (0.1–0.25), `raw_below_low` is `conf <= track_low_thresh`. They always sum to `raw_detections`. Because the NMS gate is 0.3, every detection below 0.3 was already discarded before the tracker ran: the low and below bands are structurally zero, and **a zero there is not a ByteTrack rejection**.
+
+**Files.** `detection_accounting.jsonl` holds exactly one record per processed frame, including zero-detection frames: `frame`, `timestamp_s`, `raw_detections`, `raw_high_conf`, `raw_low_conf`, `raw_below_low`, `emitted_detections`, `dropped_detections`, `tracker_update_skipped`, `tracker_frame_id`, `active_tracks`, `lost_tracks`, `emitted_track_ids`. `detection_accounting_summary.json` holds the totals, the rates, the per-frame drop histogram, the in-effect detector and tracker settings, the consistency-equation results and the `not_measured` list. `run_manifest.json` gains a `detection_accounting` block.
+
+**Rates and denominators.** `emission_rate = emitted / raw` and `drop_rate = 1 - emission_rate`, both over all raw detections in the run; `frames_with_drop` and `frames_raw_zero` are over processed frames. If a run has no raw detections the rates are `null` rather than 0.
+
+**Video frame index vs tracker counter.** `tracker_frame_id` is ByteTrack's own counter, incremented only when `update()` is called. `trackers/track.py` skips the call entirely on frames with no detections, so `tracker_frame_id = frames_processed - frames_with_zero_raw_detections` and it must never be read as a frame number. `tracker_update_skipped` records exactly that skip per frame.
+
+**What is deliberately not measured.** Individual drop reasons (ByteTrack computes its unmatched lists inside `update()` and discards them; recovering them would mean patching the library), total removed tracks (`byte_tracker.py` truncates `removed_stracks` to its last 999 entries, so it saturates and is not a counter), and second-association activity (empty by construction at the current gate). All three are listed under `not_measured` in the summary instead of being guessed at.
+
+`validate_tracking_outputs.py` checks the accounting against the emitted files: one record per frame, sequential frame indices, bands summing to raw, `emitted <= raw`, `dropped == raw - emitted`, emitted totals equal to `boxes.jsonl` and `identified_boxes.jsonl` row counts, skipped updates equal to zero-raw frames, ID counts matching emitted counts, and summary totals matching the per-frame records. It reports violations; it never rewrites output files.
+
 ## Team labels and role candidates
 `team_classifier.py` produces anonymous `TEAM_A`/`TEAM_B` clusters. Two rules govern how those labels may be read.
 
@@ -88,6 +111,8 @@ One exception is deliberate: crops with strong referee evidence are kept out of 
 - players.json: every roster identity mapped to its fragments; UNK lists unresolved fragments.
 - identified.mp4: optional second-pass annotated video (no audio).
 - run_manifest.json: actual weights/model provenance and parameters.
+- detection_accounting.jsonl: one record per processed frame: raw vs emitted vs dropped detections, confidence bands, tracker counters.
+- detection_accounting_summary.json: aggregate accounting totals, rates, drop histogram, consistency checks and `not_measured` limitations.
 
 Bounded appearance storage and streaming box logs avoid keeping a full match's boxes in RAM. Fragments/embeddings remain in memory. No training has been run. CPU inference has been run on short broadcast clips only; those runs are not accuracy evidence because no ground-truth annotations exist.
 

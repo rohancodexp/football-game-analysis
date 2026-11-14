@@ -25,7 +25,7 @@ from typing import Any, Iterable, Optional
 
 import cv2
 
-from output_schema import iter_jsonl, validate_rows
+from output_schema import iter_jsonl, validate_accounting_rows, validate_rows
 
 
 def quantiles(values: list[float], qs: Iterable[float] = (0.10, 0.25, 0.50, 0.75, 0.90)) -> dict:
@@ -437,6 +437,110 @@ def analyse_render(run_dir: Path, expected_frames: int, video: dict) -> dict:
     }
 
 
+def analyse_detection_accounting(
+    run_dir: Path,
+    *,
+    boxes_rows: int,
+    identified_rows: int,
+    expected_frames: Optional[int],
+) -> dict:
+    """Verify detection_accounting.jsonl and its summary. Reports only; never rewrites files."""
+    path = run_dir / "detection_accounting.jsonl"
+    summary_path = run_dir / "detection_accounting_summary.json"
+    if not path.exists():
+        return {"exists": False, "valid": False,
+                "errors": ["detection_accounting.jsonl is missing; this run predates Stage 2 accounting or failed to write it"]}
+
+    records = list(iter_jsonl(path))
+    result = validate_accounting_rows(
+        records,
+        expected_frames=expected_frames,
+        boxes_rows=boxes_rows,
+        identified_rows=identified_rows,
+    )
+    errors = list(result["errors"])
+
+    # Per-frame flags, computed directly from the records rather than inferred from error
+    # strings. validate_accounting_rows already reports the matching errors.
+    flags = {"bands_sum_to_raw": True, "emitted_le_raw": True, "dropped_equals_arithmetic": True,
+             "ids_match_emitted": True, "sequential_frames": True}
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        raw, emitted = record.get("raw_detections"), record.get("emitted_detections")
+        dropped = record.get("dropped_detections")
+        bands = [record.get(k) for k in ("raw_high_conf", "raw_low_conf", "raw_below_low")]
+        if all(isinstance(b, int) and not isinstance(b, bool) for b in bands) \
+                and isinstance(raw, int) and sum(bands) != raw:
+            flags["bands_sum_to_raw"] = False
+        if isinstance(raw, int) and isinstance(emitted, int) and emitted > raw:
+            flags["emitted_le_raw"] = False
+        if all(isinstance(v, int) for v in (raw, emitted, dropped)) and dropped != raw - emitted:
+            flags["dropped_equals_arithmetic"] = False
+        ids = record.get("emitted_track_ids")
+        if isinstance(ids, list) and isinstance(emitted, int) and len(ids) != emitted:
+            flags["ids_match_emitted"] = False
+        if record.get("frame") != index:
+            flags["sequential_frames"] = False
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else None
+    summary_check: dict[str, Any] = {"exists": summary is not None}
+    if summary is not None:
+        recomputed = result["totals"]
+        reported = summary.get("totals", {})
+        mismatched = {
+            key: {"summary": reported.get(key), "recomputed": recomputed[key]}
+            for key in recomputed
+            if reported.get(key) != recomputed[key]
+        }
+        histogram_mismatch = reported.get("drop_histogram") != {str(k): v for k, v in sorted(
+            Counter(record.get("dropped_detections", 0) for record in records if isinstance(record, dict)).items())}
+        expected_max_drop = max((record.get("dropped_detections", 0) for record in records
+                                 if isinstance(record, dict)), default=0)
+        max_drop_mismatch = reported.get("max_dropped_detections") != expected_max_drop
+        if mismatched:
+            errors.append(f"summary totals disagree with per-frame records: {mismatched}")
+        if histogram_mismatch:
+            errors.append("summary drop_histogram disagrees with per-frame records")
+        if max_drop_mismatch:
+            errors.append(f"summary max_dropped_detections {reported.get('max_dropped_detections')!r} "
+                          f"!= recomputed {expected_max_drop}")
+        consistency = summary.get("consistency", {})
+        if not consistency.get("all_hold", False):
+            errors.append(f"summary reports consistency violations: {consistency.get('violations')}")
+        summary_check.update({
+            "accounting_version": summary.get("accounting_version"),
+            "frames_processed": summary.get("frames_processed"),
+            "totals_agree_with_records": not mismatched and not histogram_mismatch and not max_drop_mismatch,
+            "consistency_all_hold": consistency.get("all_hold"),
+            "consistency_violations": consistency.get("violations"),
+            "rates": summary.get("rates"),
+            "not_measured_present": "per_detection_drop_reason" in summary.get("not_measured", {}),
+        })
+    else:
+        errors.append("detection_accounting_summary.json is missing")
+
+    result["errors"] = errors[:50]
+    result["error_count"] = len(errors)
+    result["valid"] = not errors
+    result["summary"] = summary_check
+    result["checks"] = {
+        "one_record_per_processed_frame": expected_frames is None or len(records) == expected_frames,
+        "frame_indices_sequential": flags["sequential_frames"],
+        "bands_are_mutually_exclusive_and_sum_to_raw": flags["bands_sum_to_raw"],
+        "emitted_le_raw": flags["emitted_le_raw"],
+        "dropped_equals_raw_minus_emitted": flags["dropped_equals_arithmetic"],
+        "emitted_equals_boxes_rows": boxes_rows == result["totals"]["emitted_detections"],
+        "emitted_equals_identified_rows": identified_rows == result["totals"]["emitted_detections"],
+        "skipped_equals_zero_raw_frames": (
+            result["totals"]["frames_tracker_update_skipped"] == result["totals"]["frames_raw_zero"]),
+        "emitted_ids_match_emitted_count": flags["ids_match_emitted"],
+        "summary_agrees_with_records": summary_check.get("totals_agree_with_records", False),
+    }
+    result["check_count_failed"] = sum(1 for ok in result["checks"].values() if ok is False)
+    return result
+
+
 def analyse_schema(run_dir: Path) -> dict:
     out = {}
     for name in ("boxes.jsonl", "identified_boxes.jsonl"):
@@ -512,6 +616,12 @@ def main() -> None:
         "id_switch_heuristic": analyse_id_switch_heuristic(boxes, switch_iou=args.switch_iou),
         "fragments": analyse_fragments(fragments, fps, args.fragment_gap, args.max_fragment_seconds),
         "output_consistency": analyse_output_consistency(boxes, identified, fragments),
+        "detection_accounting": analyse_detection_accounting(
+            run_dir,
+            boxes_rows=len(boxes),
+            identified_rows=len(identified),
+            expected_frames=int(manifest["frames"]) if manifest.get("frames") is not None else None,
+        ),
         "render": analyse_render(run_dir, int(manifest.get("frames") or 0), video),
         "schema": analyse_schema(run_dir),
     }
