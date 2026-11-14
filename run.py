@@ -8,12 +8,14 @@ from PIL import Image
 from torchvision.models import resnet18, ResNet18_Weights
 from ultralytics import YOLO
 from output_schema import (
+    ACCOUNTING_VERSION,
     PLAYER_ID_UNRESOLVED,
     SCHEMA_VERSION,
     TEAM_UNKNOWN,
     build_detection_id,
     normalize_team_label,
     schema_descriptor,
+    validate_accounting_record,
 )
 
 
@@ -125,6 +127,153 @@ def finalize_embedding(fragment, min_observations):
     return fragment
 
 
+class RawDetectionCapture:
+    """Read-only observer of the detections handed to ByteTrack.
+
+    Registered on the model before the first ``track()`` call, so ultralytics runs it
+    ahead of the tracker's own ``on_predict_postprocess_end`` callback (callbacks fire in
+    registration order; the tracker registers itself on that first call). It only reads.
+    """
+
+    def __init__(self):
+        self.confidences = None
+
+    def __call__(self, predictor):
+        results = getattr(predictor, 'results', None)
+        if not results:
+            self.confidences = []
+            return
+        boxes = results[0].boxes
+        self.confidences = [] if boxes is None else [float(c) for c in boxes.conf.cpu().numpy()]
+
+
+def confidence_bands(scores, high_thresh, low_thresh):
+    """Mutually exclusive bands on the same boundaries ByteTrack itself uses.
+
+    high: conf >= high_thresh. low: low_thresh < conf < high_thresh. below: conf <= low_thresh.
+    With the pipeline's NMS gate at 0.3 the low and below bands are empty by construction:
+    those detections were removed before the tracker ever saw them, so a zero here is not a
+    ByteTrack rejection.
+    """
+    high = sum(1 for s in scores if s >= high_thresh)
+    low = sum(1 for s in scores if low_thresh < s < high_thresh)
+    return {'raw_high_conf': high, 'raw_low_conf': low, 'raw_below_low': len(scores) - high - low}
+
+
+def build_accounting_record(*, frame_idx, fps, scores, emitted_track_ids, tracker_frame_id,
+                            active_tracks, lost_tracks, high_thresh, low_thresh,
+                            previous_tracker_frame_id):
+    """One per-frame accounting record, validated before it can be written."""
+    scores = list(scores)
+    record = {
+        'frame': frame_idx,
+        'timestamp_s': frame_idx / fps,
+        'raw_detections': len(scores),
+        **confidence_bands(scores, high_thresh, low_thresh),
+        'emitted_detections': len(emitted_track_ids),
+        'dropped_detections': len(scores) - len(emitted_track_ids),
+        'tracker_update_skipped': tracker_frame_id == previous_tracker_frame_id,
+        'tracker_frame_id': tracker_frame_id,
+        'active_tracks': active_tracks,
+        'lost_tracks': lost_tracks,
+        'emitted_track_ids': [int(i) for i in emitted_track_ids],
+    }
+    errors = validate_accounting_record(record, context=f'frame {frame_idx}',
+                                        previous_tracker_frame_id=previous_tracker_frame_id)
+    if errors:
+        raise RuntimeError('inconsistent accounting record: ' + '; '.join(errors))
+    return record
+
+
+def new_accounting_totals():
+    return {'raw_detections': 0, 'raw_high_conf': 0, 'raw_low_conf': 0, 'raw_below_low': 0,
+            'emitted_detections': 0, 'dropped_detections': 0, 'frames_with_drop': 0,
+            'max_dropped_detections': 0, 'frames_raw_zero': 0, 'frames_tracker_update_skipped': 0,
+            'drop_histogram': Counter()}
+
+
+def accumulate_accounting(totals, record):
+    """Fold one record into the aggregate counters; keeps only O(1) state per frame."""
+    for key in ('raw_detections', 'raw_high_conf', 'raw_low_conf', 'raw_below_low',
+                'emitted_detections', 'dropped_detections'):
+        totals[key] += record[key]
+    dropped = record['dropped_detections']
+    if dropped > 0:
+        totals['frames_with_drop'] += 1
+    totals['max_dropped_detections'] = max(totals['max_dropped_detections'], dropped)
+    totals['drop_histogram'][dropped] += 1
+    if record['raw_detections'] == 0:
+        totals['frames_raw_zero'] += 1
+    if record['tracker_update_skipped']:
+        totals['frames_tracker_update_skipped'] += 1
+    return totals
+
+
+def accounting_consistency(totals, *, frames, boxes_rows, identified_rows, final_tracker_frame_id):
+    """The equations that must hold if the accounting and the emitted files agree."""
+    raw = totals['raw_detections']
+    emitted = totals['emitted_detections']
+    checks = {
+        'bands_sum_equals_raw': totals['raw_high_conf'] + totals['raw_low_conf'] + totals['raw_below_low'] == raw,
+        'emitted_le_raw': emitted <= raw,
+        'dropped_equals_raw_minus_emitted': totals['dropped_detections'] == raw - emitted,
+        'emitted_equals_boxes_rows': emitted == boxes_rows,
+        'emitted_equals_identified_rows': emitted == identified_rows,
+        'skipped_equals_zero_raw_frames': totals['frames_tracker_update_skipped'] == totals['frames_raw_zero'],
+        'tracker_frame_id_equals_frames_minus_zero_raw_frames': final_tracker_frame_id == frames - totals['frames_raw_zero'],
+    }
+    return {'all_hold': all(checks.values()), 'checks': checks,
+            'violations': [name for name, ok in checks.items() if not ok]}
+
+
+def build_accounting_summary(*, totals, frames, fps, video, settings, final_tracker_frame_id,
+                             boxes_rows, identified_rows):
+    raw = totals['raw_detections']
+    emission_rate = totals['emitted_detections'] / raw if raw else None
+    return {
+        'accounting_version': ACCOUNTING_VERSION,
+        'video': video, 'frames_processed': frames, 'fps': fps,
+        'settings': settings,
+        'counter_definitions': {
+            'raw_detections': 'boxes in Results.boxes immediately before the ByteTrack callback: after NMS, conf gate, class filter and max_det',
+            'raw_high_conf': 'raw with conf >= track_high_thresh',
+            'raw_low_conf': 'raw with track_low_thresh < conf < track_high_thresh',
+            'raw_below_low': 'raw with conf <= track_low_thresh',
+            'emitted_detections': 'tracker boxes with an id returned for this frame; equals rows written to boxes.jsonl',
+            'dropped_detections': 'raw - emitted; a derived total with no per-detection cause',
+            'tracker_update_skipped': 'BYTETracker.update was not called this frame (track.py skips empty detections)',
+            'tracker_frame_id': "the tracker's own counter, not the video frame index",
+            'active_tracks': 'len(tracker.tracked_stracks) after this frame',
+            'lost_tracks': 'len(tracker.lost_stracks) after this frame',
+            'emission_rate_denominator': 'raw_detections',
+            'drop_rate_denominator': 'raw_detections',
+            'frames_with_drop_denominator': 'frames_processed',
+        },
+        'totals': {k: (dict(sorted(v.items())) if isinstance(v, Counter) else v) for k, v in totals.items()},
+        'rates': {'emission_rate': emission_rate,
+                  'drop_rate': 1 - emission_rate if emission_rate is not None else None},
+        'drop_histogram': {str(k): v for k, v in sorted(totals['drop_histogram'].items())},
+        'confidence_band_totals': {k: totals[k] for k in ('raw_high_conf', 'raw_low_conf', 'raw_below_low')},
+        'final_tracker_frame_id': final_tracker_frame_id,
+        'tracker_frame_id_note': 'video frames minus frames with zero raw detections; deliberately not a frame index',
+        'consistency': accounting_consistency(totals, frames=frames, boxes_rows=boxes_rows,
+                                              identified_rows=identified_rows,
+                                              final_tracker_frame_id=final_tracker_frame_id),
+        'not_measured': {
+            'per_detection_drop_reason': (
+                'ByteTrack computes u_track/u_detection/u_unconfirmed inside update() and discards '
+                'them; attributing a cause to each dropped detection would require patching the library.'),
+            'removed_tracks_total': (
+                'tracker.removed_stracks is truncated to its last 999 entries by byte_tracker.py, '
+                'so it is not a valid counter.'),
+            'low_confidence_second_association': (
+                'with the NMS gate at conf=0.3 no detection falls in the (track_low_thresh, track_high_thresh) '
+                'band, so the second association never receives candidates; the zero count is a property of '
+                'the gate, not a ByteTrack rejection.'),
+        },
+    }
+
+
 def resolve(fragments, roster, prototypes, threshold, margin):
     players = roster.get('players', [])
     assigned = {}
@@ -209,6 +358,8 @@ def main():
         import easyocr
         reader = easyocr.Reader(['en'], gpu=a.device.startswith('cuda'))
     model = YOLO(a.weights)
+    capture = RawDetectionCapture()
+    model.add_callback('on_predict_postprocess_end', capture)
     person_ids = [int(k) for k, v in model.names.items() if v in ('person', 'player', 'goalkeeper')]
     if not person_ids: raise ValueError('Detector must have person/player/goalkeeper class names')
     cap = cv2.VideoCapture(a.video)
@@ -217,13 +368,18 @@ def main():
     if fps <= 0: raise ValueError('Video FPS unavailable')
     active = {}; fragments = []; frame_idx = 0; detection_seq = Counter()
     samples_path = out/'boxes.jsonl'
-    with samples_path.open('w') as log:
+    accounting_path = out/'detection_accounting.jsonl'
+    accounting_totals = new_accounting_totals(); accounting_settings = None
+    prev_tracker_frame_id = 0
+    with samples_path.open('w') as log, accounting_path.open('w') as acct_log:
         while True:
             ok, frame = cap.read()
             if not ok or (a.max_frames and frame_idx >= a.max_frames): break
             result = model.track(frame, persist=True, tracker='bytetrack.yaml', classes=person_ids, conf=.3, imgsz=960, device=a.device, verbose=False)[0]
+            emitted_ids = []
             if result.boxes is not None and result.boxes.id is not None:
                 for xyxy, tid, cls, conf in zip(result.boxes.xyxy.cpu().numpy(), result.boxes.id.int().cpu().tolist(), result.boxes.cls.int().cpu().tolist(), result.boxes.conf.cpu().tolist()):
+                    emitted_ids.append(tid)
                     f = active.get(tid)
                     if f is None or frame_idx-f['end_frame'] > a.fragment_gap or (frame_idx-f['start_frame'])/fps >= a.max_fragment_seconds:
                         f = new_fragment(f'F{len(fragments)+1:06d}', tid, frame_idx)
@@ -242,6 +398,31 @@ def main():
                             for _, text, confidence in reader.readtext(torso, allowlist='0123456789'):
                                 if confidence >= .85 and re.fullmatch(r'\d{1,2}',text) and 1<=int(text)<=99:
                                     f['numbers'].append(int(text))
+            tracker = model.predictor.trackers[0]
+            if capture.confidences is None:
+                raise RuntimeError('detection accounting hook did not run for this frame')
+            if accounting_settings is None:
+                pargs = model.predictor.args
+                accounting_settings = {
+                    'nms_conf': float(pargs.conf), 'nms_iou': float(pargs.iou),
+                    'max_det': int(pargs.max_det),
+                    'imgsz': [int(x) for x in pargs.imgsz] if isinstance(pargs.imgsz, (list, tuple)) else int(pargs.imgsz),
+                    'classes': person_ids,
+                    'tracker': 'bytetrack.yaml',
+                    'track_high_thresh': float(tracker.args.track_high_thresh),
+                    'track_low_thresh': float(tracker.args.track_low_thresh),
+                    'new_track_thresh': float(tracker.args.new_track_thresh),
+                    'match_thresh': float(tracker.args.match_thresh),
+                    'track_buffer': int(tracker.args.track_buffer), 'fuse_score': bool(tracker.args.fuse_score),
+                }
+            record = build_accounting_record(
+                frame_idx=frame_idx, fps=fps, scores=capture.confidences, emitted_track_ids=emitted_ids,
+                tracker_frame_id=tracker.frame_id, active_tracks=len(tracker.tracked_stracks),
+                lost_tracks=len(tracker.lost_stracks), high_thresh=tracker.args.track_high_thresh,
+                low_thresh=tracker.args.track_low_thresh, previous_tracker_frame_id=prev_tracker_frame_id)
+            acct_log.write(json.dumps(record)+'\n')
+            accumulate_accounting(accounting_totals, record)
+            prev_tracker_frame_id = tracker.frame_id
             frame_idx += 1
             if frame_idx % 300 == 0: print(f'Processed {frame_idx} frames', flush=True)
     cap.release()
@@ -262,6 +443,16 @@ def main():
             row = json.loads(line); f = by_fragment[row['fragment_id']]
             row.update({k:f[k] for k in ('player_id','team_id','jersey','identification_confidence','identification_reason','confidence','reason')})
             dst.write(json.dumps(row)+'\n')
+    boxes_rows = sum(1 for line in samples_path.open())
+    identified_rows = sum(1 for line in (out/'identified_boxes.jsonl').open())
+    summary = build_accounting_summary(
+        totals=accounting_totals, frames=frame_idx, fps=fps, video=a.video,
+        settings=accounting_settings, final_tracker_frame_id=prev_tracker_frame_id,
+        boxes_rows=boxes_rows, identified_rows=identified_rows)
+    (out/'detection_accounting_summary.json').write_text(json.dumps(summary, indent=2))
+    if not summary['consistency']['all_hold']:
+        print('WARNING: detection accounting consistency violations: '
+              + ', '.join(summary['consistency']['violations']), flush=True)
     if a.render:
         cap = cv2.VideoCapture(a.video)
         width,height = int(cap.get(3)), int(cap.get(4))
@@ -280,7 +471,7 @@ def main():
                     line = next(src,None); row = json.loads(line) if line else None
                 writer.write(frame)
         cap.release(); writer.release()
-    (out/'run_manifest.json').write_text(json.dumps({'video':a.video,'frames':frame_idx,'fps':fps,'detector':a.weights,'embedding':'torchvision ResNet18 ImageNet pretrained, NOT player-ReID trained','trained_in_this_project':False,'ocr':'EasyOCR pretrained' if reader else None,'threshold':a.threshold,'margin':a.margin,'appearance_sampling':{'rule':'per-fragment detection index','sample_every':a.sample_every,'min_observations':a.min_observations,'max_observations':a.max_observations,'min_crop_height':MIN_CROP_HEIGHT,'min_crop_width':MIN_CROP_WIDTH},'schema_version':SCHEMA_VERSION,'output_contract':schema_descriptor(),'identity_fields_note':'person_uid is reserved and not emitted; team_id in this stage is roster-inherited, not an independent classification','scope':'LTPI-inspired prototype; not official LTPI reproduction'},indent=2))
+    (out/'run_manifest.json').write_text(json.dumps({'video':a.video,'frames':frame_idx,'fps':fps,'detector':a.weights,'embedding':'torchvision ResNet18 ImageNet pretrained, NOT player-ReID trained','trained_in_this_project':False,'ocr':'EasyOCR pretrained' if reader else None,'threshold':a.threshold,'margin':a.margin,'appearance_sampling':{'rule':'per-fragment detection index','sample_every':a.sample_every,'min_observations':a.min_observations,'max_observations':a.max_observations,'min_crop_height':MIN_CROP_HEIGHT,'min_crop_width':MIN_CROP_WIDTH},'detection_accounting':{'enabled':True,'accounting_version':ACCOUNTING_VERSION,'per_frame_file':'detection_accounting.jsonl','summary_file':'detection_accounting_summary.json','settings':accounting_settings,'raw_detections':accounting_totals['raw_detections'],'emitted_detections':accounting_totals['emitted_detections'],'dropped_detections':accounting_totals['dropped_detections']},'schema_version':SCHEMA_VERSION,'output_contract':schema_descriptor(),'identity_fields_note':'person_uid is reserved and not emitted; team_id in this stage is roster-inherited, not an independent classification','scope':'LTPI-inspired prototype; not official LTPI reproduction'},indent=2))
     print(f'Finished: {len(fragments)} fragments. Outputs in {out}')
 
 if __name__=='__main__': main()
