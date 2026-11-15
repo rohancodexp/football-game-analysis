@@ -162,7 +162,9 @@ ENRICHED_IDENTITY_FIELDS: tuple[str, ...] = (
 ENRICHED_FIELD_REGISTRY = {
     **FIELD_REGISTRY,
     'player_id': (_STR, frozenset({'detection', 'fragment'}), 'roster ID or UNK; unchanged by anonymous association'),
-    'team_id': (_STR, frozenset({'detection', 'fragment'}), 'TEAM_A, TEAM_B or UNKNOWN'),
+    'team_id': (_STR, frozenset({'detection', 'fragment'}),
+                'TEAM_A, TEAM_B or UNKNOWN; accepted roster club labels HOME/AWAY '
+                'remain valid legacy compatibility values and are never mapped to TEAM_A/TEAM_B'),
     "schema_version": (_STR, frozenset({"detection", "fragment"}), "explicit enriched contract version 1.1"),
     "person_uid": ((str, type(None)), frozenset({"detection", "fragment"}),
                    "run-scoped anonymous association UID: P plus 32 lowercase hex characters, or null"),
@@ -526,8 +528,14 @@ def validate_detection_record(
         errors.append(f"{context}: unsupported schema_version {version!r}")
     elif version == ENRICHED_SCHEMA_VERSION:
         errors.extend(validate_identity_fields(row, context=context))
-        if not is_canonical_team_label(row.get('team_id')):
-            errors.append(f'{context}: enriched team_id must use the anonymous team vocabulary')
+        team = row.get('team_id')
+        # Schema 1.1 keeps the schema 1.0 compatibility rule: accepted roster
+        # club labels (HOME/AWAY) never fail validation and are never mapped
+        # onto the anonymous classification vocabulary.
+        if (not is_canonical_team_label(team)
+                and not (isinstance(team, str) and team in NON_CANONICAL_TEAM_LABELS_ACCEPTED)):
+            errors.append(f'{context}: enriched team_id must use the anonymous '
+                          'team vocabulary or an accepted roster club label')
         if not isinstance(row.get('player_id'), str) or not row['player_id'].strip():
             errors.append(f'{context}: enriched player_id must be a nonempty roster ID or UNK')
         score = row.get("team_score")

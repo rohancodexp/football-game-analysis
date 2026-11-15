@@ -2,8 +2,10 @@
 
 CLI inputs are run_manifest.json, boxes.jsonl, fragments.json, an optional
 identity_association_report.json, and an explicit human annotation wrapper.
-The manifest must record input_video_sha256. No labels are inferred from the
-association review, team, roster, embeddings, or tracking output.
+The manifest must record input_video_sha256, at the top level or inside the
+team_classification block written by the schema 1.0 pipeline. No labels are
+inferred from the association review, team, roster, embeddings, or tracking
+output.
 """
 
 from __future__ import annotations
@@ -229,7 +231,16 @@ def evaluate_run(run_dir: str | Path, annotations_path: str | Path) -> dict:
     manifest, manifest_sha = _read_json(manifest_path)
     if not isinstance(manifest, dict):
         raise ValueError("run manifest must be an object")
-    video_sha = _digest(manifest.get("input_video_sha256"), "manifest input_video_sha256")
+    # The schema 1.0 main pipeline records the input-video digest inside its
+    # team_classification block; an enriched manifest may also carry it at the
+    # top level. Accept either source but refuse a disagreement between them.
+    top_video = manifest.get("input_video_sha256")
+    nested_video = manifest.get("team_classification", {}).get("input_video_sha256") \
+        if isinstance(manifest.get("team_classification"), dict) else None
+    if top_video is not None and nested_video is not None and top_video != nested_video:
+        raise ValueError("manifest top-level and team_classification input_video_sha256 disagree")
+    raw_video_sha = top_video if top_video is not None else nested_video
+    video_sha = _digest(raw_video_sha, "manifest input_video_sha256")
     wrapper, annotation_sha = _read_json(annotation_path)
     if not isinstance(wrapper, dict):
         raise ValueError("annotations must be a human_identity_evaluation wrapper object")

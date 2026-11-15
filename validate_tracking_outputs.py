@@ -17,8 +17,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -28,11 +30,20 @@ import cv2
 from output_schema import (
     iter_jsonl, validate_accounting_rows, validate_identity_fields, validate_rows,
 )
+from identity_association import ACCEPTANCE_EXPLANATION, _person_uid
 
 ASSOCIATION_FIELDS = (
     'schema_version', 'person_uid', 'association_status',
     'association_reason', 'association_method',
 )
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def quantiles(values: list[float], qs: Iterable[float] = (0.10, 0.25, 0.50, 0.75, 0.90)) -> dict:
@@ -581,7 +592,8 @@ def analyse_schema(run_dir: Path) -> dict:
     return out
 
 
-def analyse_identity_associations(fragments, identified, report, manifest=None):
+def analyse_identity_associations(fragments, identified, report, manifest=None,
+                                  provenance_digests=None):
     errors = []
     applicable = (report is not None or any(
         isinstance(row, dict) and ('person_uid' in row or 'schema_version' in row)
@@ -660,8 +672,13 @@ def analyse_identity_associations(fragments, identified, report, manifest=None):
         seen_pairs.add(key)
         if type(pair.get('accepted')) is not bool:
             errors.append('report pair accepted must be boolean')
-        if pair.get('accepted') is True:
-            if pair.get('decision') != 'same' or pair.get('reasons') != []:
+        elif pair.get('accepted') is True:
+            # pairs[].reasons carries an acceptance explanation for accepted
+            # pairs; only entries other than that explanation count as vetoes.
+            reasons = pair.get('reasons')
+            vetoes = ([r for r in reasons if r != ACCEPTANCE_EXPLANATION]
+                      if isinstance(reasons, list) else ['malformed_reasons'])
+            if pair.get('decision') != 'same' or vetoes:
                 errors.append('accepted pair must have a same judgment and no vetoes')
             else:
                 accepted_pairs.add(key)
@@ -695,6 +712,32 @@ def analyse_identity_associations(fragments, identified, report, manifest=None):
     for fid, fragment in by_fragment.items():
         if fragment.get('person_uid') != membership.get(fid):
             errors.append(f'{fid}: UID has no matching report group')
+    provenance = report.get('provenance')
+    if provenance is not None and not isinstance(provenance, dict):
+        errors.append('report provenance must be an object when present')
+        provenance = None
+    if groups and provenance is None:
+        errors.append('accepted identity groups require report provenance')
+    digests_ok = False
+    if isinstance(provenance, dict):
+        video_hex, boxes_hex = provenance.get('video_sha256'), provenance.get('boxes_sha256')
+        digests_ok = all(isinstance(value, str)
+                         and re.fullmatch(r'[0-9a-f]{64}', value) is not None
+                         for value in (video_hex, boxes_hex))
+        if not digests_ok:
+            errors.append('report provenance digests must be lower-case SHA256 hex digests')
+        if provenance_digests is not None and digests_ok:
+            for key, value in (('video_sha256', video_hex), ('boxes_sha256', boxes_hex)):
+                expected = provenance_digests.get(key)
+                if expected is not None and value != expected:
+                    errors.append(f'stale provenance: report {key} does not match the current input')
+        if digests_ok:
+            for uid, group in groups.items():
+                members = group.get('fragment_ids')
+                if isinstance(members, list) and all(isinstance(fid, str) for fid in members):
+                    if uid != _person_uid(video_hex, boxes_hex, members):
+                        errors.append(f'{uid}: person_uid is not the deterministic digest '
+                                      'of the provenance digests and sorted member IDs')
     if manifest is not None:
         expected = {'boxes.jsonl': '1.0', 'identified_boxes.jsonl': '1.1',
                     'fragments.json': '1.1', 'detection_accounting.jsonl': '1.0'}
@@ -778,7 +821,12 @@ def main() -> None:
         except (ValueError, OSError):
             identity_report = {}
     report['identity_association'] = analyse_identity_associations(
-        fragments, identified, identity_report, manifest)
+        fragments, identified, identity_report, manifest,
+        provenance_digests={
+            'video_sha256': _file_sha256(Path(args.video)),
+            'boxes_sha256': (_file_sha256(run_dir / 'boxes.jsonl')
+                             if (run_dir / 'boxes.jsonl').exists() else None),
+        })
 
     with out_path.open('x', encoding='utf-8') as stream:
         stream.write(json.dumps(report, indent=2, allow_nan=False) + '\n')

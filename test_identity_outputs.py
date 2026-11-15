@@ -1,24 +1,33 @@
 """Synthetic cross-file identity invariants, not football accuracy evidence."""
 
 import copy
+import hashlib
+import json
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
 
+from identity_association import ACCEPTANCE_EXPLANATION, _person_uid, associate_fragments
 from validate_tracking_outputs import analyse_identity_associations
+
+
+VIDEO_SHA = 'a' * 64
+BOXES_SHA = 'b' * 64
 
 
 class IdentityOutputTests(unittest.TestCase):
     def setUp(self):
-        self.uid = 'P' + 'a' * 32
+        self.uid = _person_uid(VIDEO_SHA, BOXES_SHA, ['F1', 'F2'])
         self.fragments = [self.fragment('F1', 0, 5), self.fragment('F2', 6, 10)]
         self.manifest = {'schema_version': '1.1', 'artifact_schema_versions': {
             'boxes.jsonl': '1.0', 'identified_boxes.jsonl': '1.1',
             'fragments.json': '1.1', 'detection_accounting.jsonl': '1.0'}}
         self.rows = [{**f, 'detection_id': f'D{i}'} for i, f in enumerate(self.fragments)]
-        self.report = {'decisions': copy.deepcopy(self.fragments), 'groups': [], 'pairs': []}
+        self.report = {'decisions': copy.deepcopy(self.fragments), 'groups': [], 'pairs': [],
+                       'provenance': {'video_sha256': VIDEO_SHA, 'boxes_sha256': BOXES_SHA,
+                                      'review': None}}
 
     def fragment(self, fid, start, end):
         return {'fragment_id': fid, 'schema_version': '1.1', 'start_frame': start,
@@ -40,8 +49,9 @@ class IdentityOutputTests(unittest.TestCase):
         self.report['pairs'] = [{'left': 'F1', 'right': 'F2', 'decision': 'same',
                                  'accepted': True, 'reasons': []}]
 
-    def validate(self):
-        return analyse_identity_associations(self.fragments, self.rows, self.report, self.manifest)
+    def validate(self, **kwargs):
+        return analyse_identity_associations(self.fragments, self.rows, self.report,
+                                             self.manifest, **kwargs)
 
     def test_legacy_is_not_claimed_as_identity_validation(self):
         result = analyse_identity_associations([{'fragment_id': 'F1'}], [], None)
@@ -140,6 +150,45 @@ class IdentityOutputTests(unittest.TestCase):
         self.validate()
         self.assertEqual(before, (self.fragments, self.rows, self.report, self.manifest))
 
+    def test_provenance_rebinds_to_the_current_input_digests(self):
+        self.associate()
+        result = self.validate(provenance_digests={'video_sha256': VIDEO_SHA,
+                                                   'boxes_sha256': BOXES_SHA})
+        self.assertTrue(result['valid'], result['errors'])
+        for key in ('video_sha256', 'boxes_sha256'):
+            with self.subTest(key=key):
+                result = self.validate(provenance_digests={key: 'c' * 64})
+                self.assertFalse(result['valid'])
+                self.assertIn('stale provenance', ' '.join(result['errors']))
+
+    def test_group_without_provenance_is_rejected(self):
+        self.associate()
+        del self.report['provenance']
+        result = self.validate()
+        self.assertFalse(result['valid'])
+        self.assertIn('require report provenance', ' '.join(result['errors']))
+
+    def test_malformed_provenance_digest_is_rejected(self):
+        self.associate()
+        for digest in ('A' * 64, 'a' * 63, '', None, 7):
+            with self.subTest(digest=digest):
+                self.report['provenance']['video_sha256'] = digest
+                result = self.validate()
+                self.assertFalse(result['valid'])
+                self.assertIn('lower-case SHA256', ' '.join(result['errors']))
+
+    def test_forged_uid_survives_field_consistency_but_fails_recomputation(self):
+        # Adversarial: fragments, decisions and groups all agree on a UID that
+        # is not the deterministic digest of provenance digests plus members.
+        self.uid = 'P' + '0' * 32
+        self.associate()
+        result = self.validate(provenance_digests={'video_sha256': VIDEO_SHA,
+                                                   'boxes_sha256': BOXES_SHA})
+        self.assertFalse(result['valid'])
+        self.assertIn('deterministic digest', ' '.join(result['errors']))
+        genuine = self.validate()
+        self.assertEqual(genuine['error_count'], 1, genuine['errors'])
+
 
 class ValidatorWriteSafetyTests(unittest.TestCase):
     def test_refuses_existing_reports_and_new_files_inside_run(self):
@@ -158,6 +207,63 @@ class ValidatorWriteSafetyTests(unittest.TestCase):
                 self.assertIn('error:', result.stderr)
             self.assertEqual(existing.read_text(encoding='utf-8'), 'preserve this evidence')
             self.assertFalse((run / 'new.json').exists())
+
+
+class EngineReportIntegrationTests(unittest.TestCase):
+    """Positive test using real association-engine output, not empty-reason fixtures."""
+
+    VIDEO = hashlib.sha256(b"synthetic-video").hexdigest()
+    BOXES = hashlib.sha256(b"synthetic-boxes").hexdigest()
+
+    def engine_fragment(self, fid, start, end):
+        return {'fragment_id': fid, 'track_id': 3, 'start_frame': start, 'end_frame': end,
+                'embedding': [1.0, 0.0, 0.0],
+                'appearance_evidence': {'status': 'ok', 'embedding_generated': True},
+                'team_id': 'UNKNOWN',
+                'team_classification': {'team_id': 'UNKNOWN', 'score': 0.0},
+                'player_id': 'UNK'}
+
+    def test_engine_accepted_pair_report_passes_the_validator(self):
+        fragments = [self.engine_fragment('F1', 0, 5), self.engine_fragment('F2', 6, 10)]
+        review = {
+            'kind': 'human_fragment_identity_review', 'video_sha256': self.VIDEO,
+            'boxes_sha256': self.BOXES, 'reviewer': 'Synthetic policy reviewer',
+            'reviewed_at': '2026-11-15T00:00:00Z',
+            'fragments': [{'fragment_id': f['fragment_id'], 'single_person': True,
+                           'full_span_reviewed': True, 'shot_id': 'synthetic-shot-1'}
+                          for f in fragments],
+            'pairs': [{'left': 'F1', 'right': 'F2', 'decision': 'same',
+                       'reason': 'Synthetic policy evidence, not real accuracy.'}],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'review.json'
+            path.write_text(json.dumps(review, allow_nan=False), encoding='utf-8')
+            report = associate_fragments(fragments, video_sha256=self.VIDEO,
+                                         boxes_sha256=self.BOXES, review_path=path)
+        accepted = [p for p in report['pairs'] if p['accepted']]
+        self.assertEqual(len(accepted), 1)
+        self.assertEqual(accepted[0]['reasons'], [ACCEPTANCE_EXPLANATION])
+        self.assertEqual(len(report['groups']), 1)
+        rows = [{**f, 'detection_id': f'D00000{i}'} for i, f in enumerate(fragments)]
+        manifest = {'schema_version': '1.1', 'artifact_schema_versions': {
+            'boxes.jsonl': '1.0', 'identified_boxes.jsonl': '1.1',
+            'fragments.json': '1.1', 'detection_accounting.jsonl': '1.0'}}
+        result = analyse_identity_associations(
+            fragments, rows, report, manifest,
+            provenance_digests={'video_sha256': self.VIDEO, 'boxes_sha256': self.BOXES})
+        self.assertTrue(result['valid'], result['errors'])
+        self.assertEqual(result['associated_fragments'], 2)
+        self.assertEqual(result['groups'], 1)
+
+    def test_validator_still_rejects_acceptance_flag_with_veto_reasons(self):
+        fragments = [self.engine_fragment('F1', 0, 5), self.engine_fragment('F2', 6, 10)]
+        report = {'decisions': copy.deepcopy(fragments), 'groups': [],
+                  'pairs': [{'left': 'F1', 'right': 'F2', 'decision': 'same',
+                             'accepted': True,
+                             'reasons': [ACCEPTANCE_EXPLANATION, 'inclusive_frame_overlap']}]}
+        result = analyse_identity_associations(fragments, [], report, None)
+        self.assertFalse(result['valid'])
+        self.assertIn('no vetoes', ' '.join(result['errors']))
 
 
 if __name__ == '__main__':
