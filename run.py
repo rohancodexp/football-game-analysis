@@ -21,8 +21,10 @@ from team_classifier import (
     evaluate_role_candidate,
     extract_torso_crop,
 )
+from identity_association import EXTENSION_FIELDS, associate_fragments
 from output_schema import (
     ACCOUNTING_VERSION,
+    ENRICHED_SCHEMA_VERSION,
     PLAYER_ID_UNRESOLVED,
     SCHEMA_VERSION,
     TEAM_UNKNOWN,
@@ -31,6 +33,7 @@ from output_schema import (
     schema_descriptor,
     validate_accounting_record,
 )
+from validate_tracking_outputs import analyse_identity_associations
 
 
 def unit(x):
@@ -670,6 +673,66 @@ def build_accounting_summary(*, totals, frames, fps, video, settings, final_trac
     }
 
 
+# --- Anonymous identity association (Stage 6) ---------------------------------
+#
+# Raw boxes and accounting stay schema 1.0 and byte-identical. Only the enriched
+# artifacts gain the five 1.1 extension fields; player_id, team_id, jersey,
+# geometry, fragment boundaries and embeddings are never changed by this step.
+
+ARTIFACT_SCHEMA_VERSIONS = {
+    'boxes.jsonl': '1.0',
+    'detection_accounting.jsonl': '1.0',
+    'identified_boxes.jsonl': ENRICHED_SCHEMA_VERSION,
+    'fragments.json': ENRICHED_SCHEMA_VERSION,
+}
+IDENTITY_REPORT_FILE = 'identity_association_report.json'
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def note_fragment_endpoint(fragment, bbox):
+    """Remember a fragment's first and last box (diagnostics for reviewed pairs only)."""
+    fragment.setdefault('_start_bbox', list(bbox))
+    fragment['_end_bbox'] = list(bbox)
+
+
+def associate_identities(fragments, *, video_sha256, boxes_sha256, review_path):
+    """Run reviewed anonymous association; pop endpoint scratch fields first.
+
+    Without a review no pair is assessed and every fragment stays unresolved with a
+    null person_uid. An invalid or stale review raises ValueError before any fragment
+    is changed (fail closed).
+    """
+    endpoints = {f['fragment_id']: {'start_bbox': f.pop('_start_bbox', None),
+                                    'end_bbox': f.pop('_end_bbox', None)} for f in fragments}
+    report = associate_fragments(fragments, video_sha256=video_sha256, boxes_sha256=boxes_sha256,
+                                 review_path=review_path, endpoints=endpoints)
+    report['review_status'] = 'applied' if review_path else 'not_supplied'
+    if not review_path:
+        report['review_note'] = ('No identity review was supplied, so no reviewed association was '
+                                 'performed: every person_uid is null and no anonymous identity is claimed.')
+    return report
+
+
+def identity_row_fields(fragment):
+    """The five schema 1.1 extension fields copied onto each detection row."""
+    return {key: fragment[key] for key in EXTENSION_FIELDS}
+
+
+def render_label(row, show_person_uid):
+    """Annotated-video label. person_uid appears only for a validated accepted association."""
+    label = f"{row['fragment_id']} {row['player_id']}"
+    if show_person_uid and row.get('association_status') == 'associated' and row.get('person_uid'):
+        label += f" {row['person_uid'][:9]}"
+    return label
+
+
 def resolve(fragments, roster, prototypes, threshold, margin):
     players = roster.get('players', [])
     assigned = {}
@@ -746,6 +809,9 @@ def main():
     ap.add_argument('--team-calibration', help='human-reviewed validation policy; absent means team abstention')
     ap.add_argument('--team-save-crops', action='store_true',
                     help='write accepted torso crops and a crop index for the existing review/clustering tools')
+    ap.add_argument('--identity-review',
+                    help='human-reviewed fragment identity review bound to this video and its boxes.jsonl '
+                         'by SHA256; absent means no anonymous association (every person_uid stays null)')
     a = ap.parse_args()
     if a.sample_every < 1 or a.fragment_gap < 1 or a.max_fragment_seconds <= 0:
         ap.error('Sampling/gap/duration must be positive')
@@ -757,6 +823,8 @@ def main():
         ap.error('--team-min-votes must be at least 1')
     if not .5 <= a.team_min_majority <= 1.:
         ap.error('--team-min-majority must be between 0.50 and 1.00')
+    if a.identity_review and not Path(a.identity_review).is_file():
+        ap.error('--identity-review must name an existing review file')
     video_digest = hashlib.sha256()
     with Path(a.video).open('rb') as video_file:
         for block in iter(lambda: video_file.read(1024 * 1024), b''):
@@ -825,6 +893,7 @@ def main():
                     detection_seq[(frame_idx, tid)] += 1
                     row = {'frame':frame_idx, 'timestamp_s':frame_idx/fps, 'detection_id':build_detection_id(frame_idx, tid, seq), 'fragment_id':f['fragment_id'], 'track_id':tid, 'bbox_xyxy':[float(x) for x in xyxy], 'detector_confidence':float(conf), 'class_id':cls}
                     log.write(json.dumps(row)+'\n')
+                    note_fragment_endpoint(f, row['bbox_xyxy'])
                     if is_sampling_turn(detection_index, a.sample_every):
                         crop = record_observation(f, frame, xyxy, encoder, a.max_observations)
                         if crop is not None and reader:
@@ -893,6 +962,12 @@ def main():
                                            'samples': len(crop_index['samples']),
                                            'crop_write_failures': crop_index['crop_write_failures']}
     release_team_crops(fragments)
+    boxes_sha256 = file_sha256(samples_path)
+    try:
+        identity_report = associate_identities(fragments, video_sha256=video_sha256,
+                                               boxes_sha256=boxes_sha256, review_path=a.identity_review)
+    except ValueError as exc:
+        raise SystemExit(f'Identity review rejected (fail closed, no association applied): {exc}')
     by_fragment = {f['fragment_id']:f for f in fragments}
     groups = {p['player_id']: {'team_id':p['team_id'],'jersey':p['jersey'],'fragments':[]} for p in roster['players']}
     groups[PLAYER_ID_UNRESOLVED] = {'fragments':[]}
@@ -906,6 +981,7 @@ def main():
             row = json.loads(line); f = by_fragment[row['fragment_id']]
             row.update({k:f[k] for k in ('player_id','team_id','jersey','identification_confidence','identification_reason','confidence','reason')})
             row.update(team_row_fields(f))
+            row.update(identity_row_fields(f))
             dst.write(json.dumps(row)+'\n')
     boxes_rows = sum(1 for line in samples_path.open())
     identified_rows = sum(1 for line in (out/'identified_boxes.jsonl').open())
@@ -918,6 +994,21 @@ def main():
         print('WARNING: detection accounting consistency violations: '
               + ', '.join(summary['consistency']['violations']), flush=True)
     (out/'team_classification_report.json').write_text(json.dumps(team_report, indent=2))
+    (out/IDENTITY_REPORT_FILE).write_text(json.dumps(identity_report, indent=2, allow_nan=False))
+    with (out/'identified_boxes.jsonl').open() as src:
+        identified_for_check = [json.loads(line) for line in src if line.strip()]
+    identity_check = analyse_identity_associations(
+        fragments, identified_for_check, identity_report,
+        {'schema_version': ENRICHED_SCHEMA_VERSION, 'artifact_schema_versions': ARTIFACT_SCHEMA_VERSIONS},
+        provenance_digests={'video_sha256': video_sha256, 'boxes_sha256': boxes_sha256})
+    del identified_for_check
+    counts = identity_report['counts']
+    print(f"Identity association: review={identity_report['review_status']} "
+          f"groups={counts['groups']} associated={counts['fragments_associated']} "
+          f"unresolved={counts['fragments_unresolved']} cross_file_valid={identity_check['valid']}", flush=True)
+    if not identity_check['valid']:
+        print('ERROR: identity outputs failed cross-file validation; person_uid will not be rendered: '
+              + '; '.join(identity_check['errors'][:5]), flush=True)
     print(f"Team classification: fit={team_report['fit']['fitted']} "
           f"fingerprint={team_report['fit']['cluster_fingerprint']} "
           f"fragments={team_report['fragment_label_distribution']} "
@@ -938,11 +1029,13 @@ def main():
                     x1,y1,x2,y2 = map(int,row['bbox_xyxy'])
                     color = (0,180,0) if row['player_id']!='UNK' else (0,165,255)
                     cv2.rectangle(frame,(x1,y1),(x2,y2),color,2)
-                    cv2.putText(frame,f"{row['fragment_id']} {row['player_id']}",(x1,max(15,y1-5)),cv2.FONT_HERSHEY_SIMPLEX,.45,color,1)
+                    cv2.putText(frame,render_label(row, identity_check['valid']),(x1,max(15,y1-5)),cv2.FONT_HERSHEY_SIMPLEX,.45,color,1)
                     line = next(src,None); row = json.loads(line) if line else None
                 writer.write(frame)
         cap.release(); writer.release()
-    (out/'run_manifest.json').write_text(json.dumps({'video':a.video,'frames':frame_idx,'fps':fps,'detector':a.weights,'embedding':'torchvision ResNet18 ImageNet pretrained, NOT player-ReID trained','trained_in_this_project':False,'ocr':'EasyOCR pretrained' if reader else None,'threshold':a.threshold,'margin':a.margin,'appearance_sampling':{'rule':'per-fragment detection index','sample_every':a.sample_every,'min_observations':a.min_observations,'max_observations':a.max_observations,'min_crop_height':MIN_CROP_HEIGHT,'min_crop_width':MIN_CROP_WIDTH},'detection_accounting':{'enabled':True,'accounting_version':ACCOUNTING_VERSION,'per_frame_file':'detection_accounting.jsonl','summary_file':'detection_accounting_summary.json','settings':accounting_settings,'raw_detections':accounting_totals['raw_detections'],'emitted_detections':accounting_totals['emitted_detections'],'dropped_detections':accounting_totals['dropped_detections']},'schema_version':SCHEMA_VERSION,'output_contract':schema_descriptor(),'team_classification':team_report,'identity_fields_note':'person_uid is reserved and not emitted; team_id is now an independent kit-cluster classification and does not depend on roster identification (the roster-inherited value is kept per fragment under team_classification.roster_inherited_team_id)','scope':'LTPI-inspired prototype; not official LTPI reproduction'},indent=2))
+    (out/'run_manifest.json').write_text(json.dumps({'video':a.video,'frames':frame_idx,'fps':fps,'detector':a.weights,'embedding':'torchvision ResNet18 ImageNet pretrained, NOT player-ReID trained','trained_in_this_project':False,'ocr':'EasyOCR pretrained' if reader else None,'threshold':a.threshold,'margin':a.margin,'appearance_sampling':{'rule':'per-fragment detection index','sample_every':a.sample_every,'min_observations':a.min_observations,'max_observations':a.max_observations,'min_crop_height':MIN_CROP_HEIGHT,'min_crop_width':MIN_CROP_WIDTH},'detection_accounting':{'enabled':True,'accounting_version':ACCOUNTING_VERSION,'per_frame_file':'detection_accounting.jsonl','summary_file':'detection_accounting_summary.json','settings':accounting_settings,'raw_detections':accounting_totals['raw_detections'],'emitted_detections':accounting_totals['emitted_detections'],'dropped_detections':accounting_totals['dropped_detections']},'schema_version':ENRICHED_SCHEMA_VERSION,'output_contract':schema_descriptor(ENRICHED_SCHEMA_VERSION),'raw_output_contract':schema_descriptor(SCHEMA_VERSION),'artifact_schema_versions':ARTIFACT_SCHEMA_VERSIONS,'input_video_sha256':video_sha256,'boxes_sha256':boxes_sha256,'identity_association':{'report_file':IDENTITY_REPORT_FILE,'review_status':identity_report['review_status'],'review_sha256':(identity_report['provenance']['review'] or {}).get('sha256'),'method':'human_reviewed_pair_clique','counts':identity_report['counts'],'cross_file_validation':{'valid':identity_check['valid'],'error_count':identity_check.get('error_count',0),'errors':identity_check['errors'][:20]},'accuracy_claim':None},'team_classification':team_report,'identity_fields_note':'person_uid is a run-scoped anonymous association UID, emitted only for human-reviewed accepted groups and null otherwise; it is not a real-world identity and does not change player_id or team_id. team_id is now an independent kit-cluster classification and does not depend on roster identification (the roster-inherited value is kept per fragment under team_classification.roster_inherited_team_id)','scope':'LTPI-inspired prototype; not official LTPI reproduction'},indent=2))
     print(f'Finished: {len(fragments)} fragments. Outputs in {out}')
+    if not identity_check['valid']:
+        raise SystemExit('Identity outputs failed cross-file validation; see run_manifest.json')
 
 if __name__=='__main__': main()
