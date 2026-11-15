@@ -1,6 +1,6 @@
 # Video-input long-term player identification — capstone prototype
 
-> **Work-in-progress handoff (2026-11-15):** Stage 4A/4B passed their video checkpoints. The full suite now passes: 414 tests, no failures (two skips only where model weights or clips are not cached locally). The five known handoff issues — unordered embedding-input rejection, schema 1.1 HOME/AWAY compatibility, the engine/validator acceptance-reason mismatch, the untested evaluation module, and the provenance/deterministic-UID validation gaps — are resolved with tests. Schema 1.1 and reviewed identity association remain drafts, **not integrated into `run.py`**. See the [consolidated report and teammate continuation checklist](docs/pillar1_report/07_experiments_and_results.md), including its continuation addendum, before continuing. This is not final Pillar 1 acceptance.
+> **Work-in-progress handoff (2026-11-15, branch `feature/pillar1-identity-completion`):** Stage 4A/4B passed their video checkpoints. Stages 5A, 5B and 6 are implemented on this branch: tracker-switch veto and public deterministic `person_uid`, a validator acceptance gate with an exit status, and **review-assisted identity association integrated into `run.py`** (`--identity-review`, schema 1.1 enriched outputs, `identity_association_report.json`). Full suite: 440 tests, no failures, 2 environment-dependent skips. Without a human review file every fragment abstains (`person_uid` null). Stage 8 full-video regression on the Stage 2 clips has **not** been run yet. See the [consolidated report](docs/pillar1_report/07_experiments_and_results.md), section 12. This is not final Pillar 1 acceptance and must not be merged into `main` without team review.
 
 ## Honest scope and training status
 No model has been trained or evaluated for you. This is an LTPI-inspired prototype, NOT the authors' implementation or a reproduction of their scores. It uses generic COCO-pretrained YOLOv8n, ByteTrack association, generic ImageNet-pretrained ResNet18 embeddings, optional generic EasyOCR, and conservative offline roster/reference matching. ResNet18 is NOT a trained football Re-ID model. EasyOCR is NOT PARSeq or a jersey-specific recognizer. Scores are similarities, NOT calibrated probabilities. No accuracy guarantee or full-match runtime claim.
@@ -24,6 +24,8 @@ python run.py --video match.mp4 --roster roster.json --out results/match --devic
 GPU: replace --device cpu with --device cuda:0
 Optional OCR: pip install -r requirements-ocr.txt
 python run.py --video match.mp4 --roster roster.json --out results/ocr --ocr --render
+Optional review-assisted identity association (see "Identity association"):
+python run.py --video match.mp4 --out results/reviewed --identity-review review.json --render
 
 The example roster is schema documentation, not actual match data. Do not run it unchanged: the image paths intentionally do not exist.
 
@@ -57,7 +59,7 @@ Assignment is deterministic for a fixed row sequence: rows are numbered in file 
 
 So `HOME`/`AWAY` never fail validation, never get rewritten, and are always reported as outside the anonymous vocabulary. The draft enriched schema 1.1 validator applies the same compatibility rule: `team_id` must be canonical or an accepted roster club label, and no `HOME`→`TEAM_A` aliasing exists there either. Now that the independent classifier owns `team_id` (Stage 4A), `HOME`/`AWAY` appear only as the preserved `roster_inherited_team_id`; there is still no aliasing to `TEAM_A`/`TEAM_B`.
 
-**Fields** — `frame`, `timestamp_s`, `detection_id`, `track_id`, `fragment_id`, `bbox_xyxy`, `detector_confidence`, `class_id`; identity fields `player_id`, `team_id`, `jersey`, `identification_confidence`, `identification_reason`. `person_uid` is RESERVED and must not appear in any output yet (persistent anonymous identity is a later task). Legacy `confidence`/`reason` keys are still written alongside their canonical `identification_confidence`/`identification_reason` names so existing readers keep working; new code should read the canonical names.
+**Fields** — `frame`, `timestamp_s`, `detection_id`, `track_id`, `fragment_id`, `bbox_xyxy`, `detector_confidence`, `class_id`; identity fields `player_id`, `team_id`, `jersey`, `identification_confidence`, `identification_reason`. `person_uid` remains prohibited in schema 1.0 rows (raw `boxes.jsonl` and unversioned/1.0 enriched rows). Since Stage 6, `run.py` writes `identified_boxes.jsonl` and `fragments.json` as schema 1.1, which add `schema_version`, nullable `person_uid`, `association_status`, `association_reason` and `association_method` (see "Identity association"). Legacy `confidence`/`reason` keys are still written alongside their canonical `identification_confidence`/`identification_reason` names so existing readers keep working; new code should read the canonical names.
 
 **Validation** — `validate_rows(rows, strict=True|False)` and `validate_crop_index_samples(samples)` return `{valid, errors, warnings, detection_id}`. `strict=False` (required level) accepts pre-contract files and reports what normalization would change; `strict=True` demands a canonical ID, canonical-or-accepted team values, and no reserved fields. Note that a row without any `track_id` still fails strict validation for the missing field even though its ordinal-keyed `detection_id` is unique. Run `python -m unittest test_output_schema -v` after touching any writer or reader.
 
@@ -136,13 +138,34 @@ A policy must declare `kind: human_reviewed_validation`, `feature_version: hsv_l
 
 Fragment diagnostics retain raw proposals, individual crop scores/distances/margins, detection IDs, role candidates, filtered votes and the final abstention reason. `team_score` remains exactly zero for every final `UNKNOWN`. The standalone clustering driver still produces uncalibrated proposals; use the main pipeline for the reliability gate. No real-world team accuracy is established.
 
+## Identity association (review-assisted, schema 1.1)
+`run.py` calls `identity_association.associate_fragments` after fragments are closed. It only adds the five extension fields to enriched rows and fragments; it never changes detection, tracking, fragment boundaries, embeddings, `player_id`, `team_id` or `players.json`.
+
+**No review file (default):** every fragment abstains. `person_uid` is null, `association_status` is `unresolved`, and `identity_association_report.json` records `review_status: not_supplied`. Generic ImageNet ResNet18 similarity alone never links two fragments.
+
+**With `--identity-review review.json`:** a human review can link fragments. The file must bind to the exact input video and the run's raw `boxes.jsonl` by SHA256 (lower-case hex), so it has to be written after a no-review run of the same video with the same settings. A stale, malformed or mismatched review is rejected and the run stops (fail closed); no partial association is written.
+
+```json
+{"kind": "human_fragment_identity_review",
+ "video_sha256": "<64 hex>", "boxes_sha256": "<64 hex>",
+ "reviewer": "name", "reviewed_at": "2026-11-15",
+ "fragments": [{"fragment_id": "F000001", "single_person": true, "full_span_reviewed": true,
+                "shot_id": "S1", "tracker_switch_suspected": false}],
+ "pairs": [{"left": "F000001", "right": "F000003", "decision": "same", "reason": "same player re-enters after occlusion"}]}
+```
+
+`tracker_switch_suspected` is optional (default false); `true` vetoes every link of that fragment. A pair is accepted only with a `same` decision, both fragments single-person and fully reviewed, the same non-null shot, disjoint inclusive time intervals, sufficient appearance evidence on both sides and no conflicting reliable team or resolved roster label. Groups need an accepted decision for **every** pair of members (A=B and B=C do not imply A=C). `person_uid` = `P` + first 32 hex of SHA256 over the video digest, boxes digest and sorted member fragment IDs, so it is deterministic and run-scoped; it is not a real-world identity.
+
+The run then validates its own outputs in-process (`validate_tracking_outputs.analyse_identity_associations`) and exits non-zero if the cross-file check fails. The rendered label shows a short `person_uid` prefix only for associated fragments and only when that check passed. `run_manifest.json` records `schema_version: 1.1`, per-artifact versions, `input_video_sha256`, `boxes_sha256` and an `identity_association` block (`review_status`, `review_sha256`, counts, `accuracy_claim: null`). A review is input evidence, not ground truth; no identity accuracy is claimed.
+
 ## Outputs
 - boxes.jsonl: streaming tracker detections with detection ID, fragment ID, boxes, timestamps.
-- identified_boxes.jsonl: boxes plus resolved Player ID, team, jersey evidence, similarity and reason.
-- fragments.json: intervals, tracker IDs, embeddings (null when appearance evidence is insufficient), `appearance_evidence` (detections, sample attempts, valid/invalid observations by reason, samples used, status and reason), OCR votes and decisions.
+- identified_boxes.jsonl (schema 1.1): boxes plus resolved Player ID, team, jersey evidence, similarity and reason, plus the identity-association fields.
+- fragments.json (schema 1.1): intervals, tracker IDs, embeddings (null when appearance evidence is insufficient), `appearance_evidence` (detections, sample attempts, valid/invalid observations by reason, samples used, status and reason), OCR votes and decisions.
 - players.json: every roster identity mapped to its fragments; UNK lists unresolved fragments.
 - identified.mp4: optional second-pass annotated video (no audio).
-- run_manifest.json: actual weights/model provenance and parameters.
+- run_manifest.json: actual weights/model provenance and parameters; schema 1.1 enriched contract, per-artifact schema versions, input video and boxes digests, identity-association summary.
+- identity_association_report.json: review status, accepted groups, blocked links with veto reasons, counts.
 - detection_accounting.jsonl: one record per processed frame: raw vs emitted vs dropped detections, confidence bands, tracker counters.
 - detection_accounting_summary.json: aggregate accounting totals, rates, drop histogram, consistency checks and `not_measured` limitations.
 - team_classification_report.json: independent team-classification configuration, fit, distributions and runtime (see "Team classification inside `run.py`").
@@ -151,8 +174,8 @@ Fragment diagnostics retain raw proposals, individual crop scores/distances/marg
 Bounded appearance storage and streaming box logs avoid keeping a full match's boxes in RAM. Fragments/embeddings remain in memory. No training has been run. CPU inference has been run on short broadcast clips only; those runs are not accuracy evidence because no ground-truth annotations exist.
 
 ## Offline analysis tools
-These read existing run outputs. None of them is wired into `run.py`, and none changes identity decisions in `run.py` output. (`run.py` reuses `team_classifier.py` and `crop_filter.py` directly; it does not call these drivers.)
-- `validate_tracking_outputs.py --video V --run-dir D`: read-only audit of a run (detection/timestamp/fragment statistics, ID-switch heuristic, schema and render checks) written to `tracking_validation.json`.
+These read existing run outputs and never change identity decisions in `run.py` output. `run.py` reuses the validator's identity cross-file check in-process (Stage 6); the other drivers are not wired in. (`run.py` reuses `team_classifier.py` and `crop_filter.py` directly; it does not call these drivers.)
+- `validate_tracking_outputs.py --video V --run-dir D`: read-only audit of a run (detection/timestamp/fragment statistics, ID-switch heuristic, schema and render checks) written to `tracking_validation.json`. It also prints `Acceptance: PASS/FAIL` and exits 1 on FAIL. The gate requires strictly valid raw and enriched schemas, a manifest, consistent accounting, zero timestamp anomalies, no inverted or duplicate fragments, valid detection accounting and valid identity association; add `--require-render` to also require a readable `identified.mp4` with matching frame count and geometry. Passing the gate means the outputs are internally consistent, not that they are accurate.
 - `review_team_crops_v2.py`: quality-filtered (`crop_filter.py`), track-balanced torso-crop review set and `crop_index.json`. `review_team_crops.py` and `make_filtered_team_sheets.py` are earlier, pre-filter-policy versions kept for reproducing old review outputs.
 - `run_team_clustering.py`: standalone anonymous `TEAM_A`/`TEAM_B` clustering over a `crop_index.json` (see "Team labels and role candidates").
 - `compare_team_runs.py`: label-alignment-aware comparison of two clustering runs.
@@ -165,8 +188,9 @@ Use class names person/player/goalkeeper for the detector. Do not train using te
 
 ## Tests after installation
 python -m unittest test_resolver.py -v
-Full suite (appearance sampling, crop filtering, team classifier and label stability, crop review, output contract, run comparison, resolver):
-python -m unittest discover -p "test_*.py" -v
+Full suite (appearance sampling, crop filtering, team classifier and label stability, crop review, output contract, identity association and its pipeline integration, validator acceptance gate, run comparison, resolver):
+python -B -m unittest discover -p "test_*.py" -v
+Expected on this branch: 440 tests, OK, 2 skips when ResNet18 weights or clips are not cached.
 
 ## Official LTPI reproduction route (separate environment)
 The official implementation, not this baseline, should be used to reproduce the base paper:
