@@ -158,6 +158,15 @@ Fragment diagnostics retain raw proposals, individual crop scores/distances/marg
 
 The run then validates its own outputs in-process (`validate_tracking_outputs.analyse_identity_associations`) and exits non-zero if the cross-file check fails. The rendered label shows a short `person_uid` prefix only for associated fragments and only when that check passed. `run_manifest.json` records `schema_version: 1.1`, per-artifact versions, `input_video_sha256`, `boxes_sha256` and an `identity_association` block (`review_status`, `review_sha256`, counts, `accuracy_claim: null`). A review is input evidence, not ground truth; no identity accuracy is claimed.
 
+## Persistent anonymous player IDs (unvalidated, post-processing)
+`assign_persistent_ids.py` reads a finished run directory (read only) and writes a new folder with `persistent_boxes.jsonl`, `persistent_ids.json` and, with `--render --video V`, `identified_persistent.mp4` (labels like `ID005 B`).
+
+python assign_persistent_ids.py --run-dir results/run1 --out results/run1_ids --video match.mp4 --render
+
+Every fragment gets one anonymous `persistent_id`. Fragments are linked by continuity (reappears within `--max-gap` 45 frames, centre within 1 box height, height ratio at most 1.5) or appearance (ResNet18 cosine at least 0.88). Links are never made between fragments that overlap in time or have disagreeing team labels, and there is no weak appearance chaining. `persistent_team_status` says whether the ID's team comes from calibrated `team_id`, uncalibrated kit-cluster proposals, both, or none. Parameters are validated; malformed embeddings and boxes are ignored and counted; structural input errors stop the tool with nothing written.
+
+These are **unvalidated anonymous IDs, not verified player identities**: no ground truth, no accuracy claim. Expect new IDs after camera cuts and occasional wrong merges between similar kits. `player_id`, `team_id` and `person_uid` are not changed. Evidence for video 1: `docs/pillar1_report/persistent_ids_evidence/`.
+
 ## Outputs
 - boxes.jsonl: streaming tracker detections with detection ID, fragment ID, boxes, timestamps.
 - identified_boxes.jsonl (schema 1.1): boxes plus resolved Player ID, team, jersey evidence, similarity and reason, plus the identity-association fields.
