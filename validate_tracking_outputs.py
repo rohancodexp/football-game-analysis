@@ -30,7 +30,7 @@ import cv2
 from output_schema import (
     iter_jsonl, validate_accounting_rows, validate_identity_fields, validate_rows,
 )
-from identity_association import ACCEPTANCE_EXPLANATION, _person_uid
+from identity_association import ACCEPTANCE_EXPLANATION, person_uid
 
 ASSOCIATION_FIELDS = (
     'schema_version', 'person_uid', 'association_status',
@@ -735,7 +735,7 @@ def analyse_identity_associations(fragments, identified, report, manifest=None,
             for uid, group in groups.items():
                 members = group.get('fragment_ids')
                 if isinstance(members, list) and all(isinstance(fid, str) for fid in members):
-                    if uid != _person_uid(video_hex, boxes_hex, members):
+                    if uid != person_uid(video_hex, boxes_hex, members):
                         errors.append(f'{uid}: person_uid is not the deterministic digest '
                                       'of the provenance digests and sorted member IDs')
     if manifest is not None:
@@ -753,7 +753,63 @@ def analyse_identity_associations(fragments, identified, report, manifest=None,
             'note': 'Cross-file consistency, not real-world identity accuracy.'}
 
 
-def main() -> None:
+def assess_acceptance(report: dict, *, require_render: bool = False) -> dict:
+    """Aggregate structural checks into one pass/fail decision.
+
+    Each check reads a field the analysis sections already computed; nothing is
+    re-measured here. Passing means the outputs are internally consistent and
+    schema-valid. It is not tracking or identity accuracy.
+    """
+    checks: dict[str, bool] = {}
+
+    def check(name: str, passed: Any) -> None:
+        checks[name] = bool(passed)
+
+    schema = report.get("schema", {})
+    for name in ("boxes.jsonl", "identified_boxes.jsonl"):
+        entry = schema.get(name, {})
+        check(f"schema.{name}.exists", entry.get("exists"))
+        check(f"schema.{name}.strict_valid",
+              entry.get("exists") and entry.get("strict_level", {}).get("valid"))
+    check("schema.run_manifest.exists", schema.get("run_manifest.json", {}).get("exists"))
+
+    consistency = report.get("output_consistency", {})
+    for key in ("row_count_equal", "detection_ids_match", "fragment_ids_unique",
+                "detection_id_unique_in_boxes", "detection_id_unique_in_identified"):
+        check(f"consistency.{key}", consistency.get(key))
+    check("consistency.no_unknown_fragment_references",
+          consistency.get("fragment_ids_referenced_by_boxes_not_in_fragments") == [])
+    check("consistency.no_field_drift",
+          consistency.get("spatiotemporal_field_drift_between_files") == {})
+
+    timestamps = report.get("timestamps", {})
+    for key in ("missing_timestamp_s", "non_numeric_timestamp_s", "negative_timestamp_s",
+                "non_finite_timestamp_s", "timestamp_not_equal_to_frame_divided_by_fps",
+                "non_monotonic_within_same_frame"):
+        check(f"timestamps.{key}_zero", timestamps.get(key) == 0)
+
+    fragments = report.get("fragments", {})
+    check("fragments.no_inverted", fragments.get("inverted_fragments") == 0)
+    check("fragments.ids_unique", fragments.get("unique_fragment_ids") == fragments.get("fragments"))
+
+    check("detection_accounting.valid", report.get("detection_accounting", {}).get("valid"))
+    check("identity_association.valid", report.get("identity_association", {}).get("valid"))
+
+    render = report.get("render", {})
+    if render.get("exists"):
+        check("render.opened", render.get("opened"))
+        check("render.frames_match", render.get("matches_frames_processed"))
+        check("render.geometry_matches_source", render.get("geometry_matches_source"))
+    else:
+        check("render.present_if_required", not require_render)
+
+    failures = sorted(name for name, passed in checks.items() if not passed)
+    return {"passed": not failures, "checks": checks, "failures": failures,
+            "require_render": require_render,
+            "note": "Structural acceptance only; not tracking or identity accuracy."}
+
+
+def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--video", required=True)
     ap.add_argument("--run-dir", required=True)
@@ -762,7 +818,9 @@ def main() -> None:
     ap.add_argument("--fragment-gap", type=int, default=30)
     ap.add_argument("--max-fragment-seconds", type=float, default=15.0)
     ap.add_argument("--switch-iou", type=float, default=0.35)
-    args = ap.parse_args()
+    ap.add_argument("--require-render", action="store_true",
+                    help="fail acceptance when identified.mp4 is absent")
+    args = ap.parse_args(argv)
 
     run_dir = Path(args.run_dir).resolve()
     out_path = Path(args.out).resolve() if args.out else run_dir.with_name(run_dir.name + '_validation.json')
@@ -828,10 +886,17 @@ def main() -> None:
                              if (run_dir / 'boxes.jsonl').exists() else None),
         })
 
+    report['acceptance'] = assess_acceptance(report, require_render=args.require_render)
+
     with out_path.open('x', encoding='utf-8') as stream:
         stream.write(json.dumps(report, indent=2, allow_nan=False) + '\n')
     print(json.dumps({section: _brief(report[section]) for section in ("detections", "render")}, indent=2))
+    acceptance = report['acceptance']
+    print(f"Acceptance: {'PASS' if acceptance['passed'] else 'FAIL'}")
+    for name in acceptance['failures']:
+        print(f"  failed: {name}")
     print(f"Full report: {out_path}")
+    return 0 if acceptance['passed'] else 1
 
 
 def _brief(value: Any) -> Any:
@@ -843,4 +908,4 @@ def _brief(value: Any) -> Any:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

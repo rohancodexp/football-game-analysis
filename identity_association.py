@@ -35,8 +35,10 @@ def _text(value):
 
 
 def _hash(value, name):
-    if not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
-        raise ValueError(f"{name} must be an exact 64-character SHA256 hex digest")
+    # Lower-case only: report validators recompute UIDs from these exact strings and
+    # reject upper-case digests, so accepting them here would mint unverifiable UIDs.
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ValueError(f"{name} must be an exact 64-character lower-case SHA256 hex digest")
 
 
 def _unique_object(items):
@@ -52,9 +54,11 @@ def _invalid_constant(value):
     raise ValueError(f"non-finite JSON constant: {value}")
 
 
-def _fields(record, required, where):
-    if not isinstance(record, dict) or set(record) != set(required):
-        raise ValueError(f"{where} must contain exactly: {', '.join(required)}")
+def _fields(record, required, where, optional=()):
+    if (not isinstance(record, dict) or not set(required) <= set(record)
+            or not set(record) <= set(required) | set(optional)):
+        allowed = ", ".join(required) + (f" (optional: {', '.join(optional)})" if optional else "")
+        raise ValueError(f"{where} must contain exactly: {allowed}")
 
 
 def _iso_review_time(value):
@@ -97,7 +101,7 @@ def _load_review(path, ids, video_sha256, boxes_sha256):
     annotations = {}
     for entry in review["fragments"]:
         _fields(entry, ("fragment_id", "single_person", "full_span_reviewed", "shot_id"),
-                "fragment review")
+                "fragment review", optional=("tracker_switch_suspected",))
         fid = entry["fragment_id"]
         if not _text(fid) or fid not in ids:
             raise ValueError("fragment review references an unknown fragment_id")
@@ -107,6 +111,8 @@ def _load_review(path, ids, video_sha256, boxes_sha256):
             raise ValueError("single_person and full_span_reviewed must be booleans")
         if entry["shot_id"] is not None and not _text(entry["shot_id"]):
             raise ValueError("shot_id must be a nonempty string or null")
+        if type(entry.get("tracker_switch_suspected", False)) is not bool:
+            raise ValueError("tracker_switch_suspected must be a boolean when present")
         annotations[fid] = entry
     pairs = {}
     for entry in review["pairs"]:
@@ -258,6 +264,10 @@ def _assess_pair(key, review, fragments, features, annotations, endpoints):
             reasons.append(f"{side}:single_person_not_confirmed")
         if not annotation["full_span_reviewed"]:
             reasons.append(f"{side}:full_span_not_reviewed")
+        if annotation.get("tracker_switch_suspected") is True:
+            # A suspected identity switch inside the fragment means it may hold two
+            # people; the architecture lists tracker-switch candidates as vetoes.
+            reasons.append(f"{side}:tracker_switch_suspected")
     same_shot = ra["shot_id"] is not None and ra["shot_id"] == rb["shot_id"]
     if ra["shot_id"] is None or rb["shot_id"] is None:
         reasons.append("unknown_shot_continuity")
@@ -342,10 +352,14 @@ def _clique_groups(ids, pairs):
     return sorted(group for group in members.values() if len(group) >= 2), blocked
 
 
-def _person_uid(video_sha256, boxes_sha256, members):
+def person_uid(video_sha256, boxes_sha256, members):
+    """Deterministic run-scoped UID for an accepted group (public for validators)."""
     payload = json.dumps([video_sha256, boxes_sha256, sorted(members)],
                          ensure_ascii=True, separators=(",", ":")).encode("utf-8")
     return "P" + hashlib.sha256(payload).hexdigest()[:32]
+
+
+_person_uid = person_uid  # Backward-compatible name used by existing callers and tests.
 
 
 def associate_fragments(fragments, *, video_sha256, boxes_sha256, review_path=None, endpoints=None):
@@ -387,7 +401,7 @@ def associate_fragments(fragments, *, video_sha256, boxes_sha256, review_path=No
     pairs = [_assess_pair(key, reviews[key], by_id, features, annotations, endpoints)
              for key in sorted(reviews)]
     member_groups, blocked = _clique_groups(ids, pairs)
-    groups = [{"person_uid": _person_uid(video_sha256, boxes_sha256, members),
+    groups = [{"person_uid": person_uid(video_sha256, boxes_sha256, members),
                "fragment_ids": members} for members in member_groups]
     uids = {fid: group["person_uid"] for group in groups for fid in group["fragment_ids"]}
     incident = {fid: [] for fid in ids}

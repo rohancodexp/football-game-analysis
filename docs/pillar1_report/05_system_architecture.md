@@ -36,3 +36,18 @@ Groups require direct accepted evidence for **every pair of members**. A-B and B
 The extension is additive to enriched output only. The legacy registry/default descriptor, detection writer, resolver, appearance aggregation and player grouping remain intact. Explicit row-version dispatch preserves the old reservation invariant. Null unresolved UIDs avoid conflating all `UNK` players. Inclusive non-overlap and complete-pair group checks protect against simultaneous-person and weak-transitive merges. Positive synthetic review fixtures validate logic only, not football identity accuracy.
 
 Implementation and integration verification are recorded in the experiments report; this design alone is not evidence of a working or accurate association system.
+
+## Implemented integration (Stages 5A-6, branch `feature/pillar1-identity-completion`)
+
+The design above is now wired into `run.py` without changing the raw stream:
+
+1. Detection, ByteTrack, fragmenting, appearance sampling, roster resolution and team classification run exactly as before and write `boxes.jsonl` (schema 1.0) and the accounting files unchanged.
+2. While each box is logged, the fragment's first and last box are noted (`note_fragment_endpoint`) for the association diagnostics only.
+3. After fragments close, `run.py` hashes the finished `boxes.jsonl` and the input video and calls `associate_fragments(fragments, video_sha256, boxes_sha256, review)`. With no `--identity-review` every fragment abstains. A rejected review stops the run before any enriched output is written.
+4. `identified_boxes.jsonl` and `fragments.json` are written as schema 1.1 with the five extension fields copied from the fragment decision; `identity_association_report.json` holds groups, blocked links and veto reasons.
+5. The run re-checks itself with `validate_tracking_outputs.analyse_identity_associations` (same code the offline validator uses, with the current provenance digests) and exits non-zero if the cross-file check fails. Only a passing check lets the renderer print a short `person_uid` on associated boxes.
+6. The manifest records the 1.1 enriched contract, the 1.0 raw contract, per-artifact versions, both digests and the association summary with `accuracy_claim: null`.
+
+Stage 5A additions: an optional reviewer flag `tracker_switch_suspected` that vetoes every link of that fragment (closing the "tracker-switch candidates are vetoes" requirement above), digest checks restricted to lower-case 64-hex, and a public `person_uid()` function shared by the engine, the validator and `run.py`. Stage 5B adds `assess_acceptance()` and a validator exit status (`--require-render` to require the rendered video).
+
+Additivity is enforced by tests: a no-review run of the new `run.py` must leave `boxes.jsonl`, the accounting files and `players.json` byte-identical to the previous code, and differ in enriched rows only by the five extension fields.

@@ -229,3 +229,26 @@ Test totals after the changes, fresh environment (Python 3.11.9, `.venv`, CPU to
 | Full discovery `python -B -m unittest discover -p "test_*.py"` | 414 tests, OK, no failures, 2 skips (`ResNet18 weights not cached`; `clip or weights unavailable`) — both environment-dependent, not correctness-related |
 
 No Stage 5A main-pipeline integration, no Stage 6 end-to-end run and no new full-video regression was performed in this continuation: `run.py` still emits schema 1.0 only, still does not call `associate_fragments` or accept `--identity-review`, and the `results/stage2_final_v1` / `results/stage2_final_v3` baselines were not present in this workspace. Section 2, 3, 4 and 6 statements above remain the historical record; item "Current executable behavior" in Section 2 and the README schema 1.0 description are still accurate for `run.py`. The acceptance decision above is unchanged until Stages 5A/6 gates run on both videos.
+
+## 12. Completion addendum: Stages 5A, 5B, 6 (branch `feature/pillar1-identity-completion`, 2026-11-15)
+
+Starting point: `main` at `4ad4329` (PR #4). The audit of Stages 1-4B and the remaining-work plan are in `STAGE_1_TO_4B_AUDIT.md` (first commit on this branch). Nothing in sections 1-11 was rewritten; their numbers still describe the code they were measured on.
+
+| Stage | Change | Tests added |
+|---|---|---|
+| 5A | Optional reviewer flag `tracker_switch_suspected` vetoes every link of that fragment; review digests must be lower-case 64-hex; public `person_uid()` used by engine, validator and `run.py` (private alias kept) | `test_identity_stage5a.py`, 9 |
+| 5B | `validate_tracking_outputs.assess_acceptance()`; CLI prints `Acceptance: PASS/FAIL`, exits 1 on FAIL; `--require-render` | `test_validator_acceptance.py`, 5 |
+| 6 | `run.py --identity-review`; schema 1.1 `identified_boxes.jsonl`/`fragments.json`; `identity_association_report.json`; in-process cross-file validation; manifest digests and association block; fail-closed review handling | `test_pipeline_identity_integration.py`, 12 (scripted detector/tracker/encoder on a synthetic clip, full `main()` runs with and without a review) |
+
+No existing test was removed or weakened. No YOLO, ByteTrack, fragmenting, appearance, resolver or team threshold was changed.
+
+| Run | Result |
+|---|---|
+| Full discovery `python -B -m unittest discover -p "test_*.py"` on `main` (`4ad4329`), Lokesh's laptop, Python 3.11, torch 2.15.0+cpu, ultralytics 8.3.40, OpenCV 4.14.0 | 414 tests, OK, 2 skips |
+| Same command on this branch, Linux container, Python 3.11.18, same library versions | 440 tests, OK, 2 skips (`ResNet18 weights not cached`; `clip or weights unavailable`) |
+
+**Synthetic additivity check (not video evidence).** The pre-Stage-6 `run.py` (`git archive 4ad4329`) and the new `run.py` without a review were run on the same synthetic clip with the same scripted detector, tracker and encoder, then compared with `validate_pillar1_regression.compare_runs` (no `--allow-render-change`). Result: passed; `boxes.jsonl`, `detection_accounting.jsonl`, `detection_accounting_summary.json` and `players.json` byte-identical; render identical; new fields only `schema_version`, `person_uid`, `association_status`, `association_reason`, `association_method` on rows and fragments; 0 changes to existing fields. The synthetic clip collects no team crops, so this does not exercise team classification.
+
+**Not done yet (Stage 8).** No full-video run of the new code on the Stage 2 clips (`1.mp4`, `3.mp4`) and no comparison against `results/stage2_final_v1` / `results/stage2_final_v3`; those files are not in this workspace. No human identity review of a real clip exists, so no real `person_uid` link has been produced. No identity precision/recall, IDF1 or other accuracy figure is claimed. When the clips are available: run the no-review pipeline into a new output directory, run `validate_tracking_outputs.py --require-render`, then `validate_pillar1_regression.py` against the matching baseline; record the results here as a new section without editing earlier ones.
+
+**Acceptance decision:** Stages 5A-6 are code-complete with unit and synthetic integration evidence. Pillar 1 is not accepted until Stage 8 video regression passes and the team reviews this branch. Do not merge into `main` before that.
