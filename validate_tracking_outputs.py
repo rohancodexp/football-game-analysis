@@ -30,7 +30,7 @@ import cv2
 from output_schema import (
     iter_jsonl, validate_accounting_rows, validate_identity_fields, validate_rows,
 )
-from identity_association import ACCEPTANCE_EXPLANATION, _person_uid
+from identity_association import ACCEPTANCE_EXPLANATION, person_uid
 
 ASSOCIATION_FIELDS = (
     'schema_version', 'person_uid', 'association_status',
@@ -735,7 +735,7 @@ def analyse_identity_associations(fragments, identified, report, manifest=None,
             for uid, group in groups.items():
                 members = group.get('fragment_ids')
                 if isinstance(members, list) and all(isinstance(fid, str) for fid in members):
-                    if uid != _person_uid(video_hex, boxes_hex, members):
+                    if uid != person_uid(video_hex, boxes_hex, members):
                         errors.append(f'{uid}: person_uid is not the deterministic digest '
                                       'of the provenance digests and sorted member IDs')
     if manifest is not None:
