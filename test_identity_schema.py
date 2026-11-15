@@ -47,7 +47,9 @@ def enriched_detection(associated=False, frame=0):
 
 class IdentityFieldTests(unittest.TestCase):
     def test_enriched_identity_and_team_sentinels_cannot_be_missing(self):
-        for key, invalid in [('team_id', (None, '', 'HOME', 'UNK', [], {})),
+        # HOME/AWAY are accepted roster club labels (schema 1.0 compatibility,
+        # retained in 1.1); only missing/blank/legacy sentinels are rejected here.
+        for key, invalid in [('team_id', (None, '', 'UNK', 'TEAM_C', [], {})),
                              ('player_id', (None, '', [], {}))]:
             row = enriched_detection()
             del row[key]

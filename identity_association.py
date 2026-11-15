@@ -19,6 +19,9 @@ from pathlib import Path
 
 SCHEMA_VERSION = "1.1"
 ASSOCIATION_METHOD = "human_reviewed_pair_clique"
+# Kept in pairs[].reasons for accepted pairs so every pair carries an
+# explanation; report validators must read it as evidence of acceptance, not a veto.
+ACCEPTANCE_EXPLANATION = "explicit_same_review_and_all_safety_checks_passed"
 EXTENSION_FIELDS = (
     "schema_version", "person_uid", "association_status",
     "association_reason", "association_method",
@@ -133,8 +136,9 @@ def _load_review(path, ids, video_sha256, boxes_sha256):
 
 
 def _vector(value):
-    """Accept real 1-D lists/arrays without coercing strings, booleans or shapes."""
-    if isinstance(value, (str, bytes, Mapping)):
+    """Accept ordered real 1-D lists/arrays; reject strings, booleans, shapes and unordered inputs."""
+    # Sets have no iteration order, so their element sequence is not reproducible.
+    if isinstance(value, (str, bytes, Mapping, set, frozenset)):
         return None, "invalid_embedding_shape"
     try:
         values = list(value)
@@ -288,7 +292,7 @@ def _assess_pair(key, review, fragments, features, annotations, endpoints):
     return {
         "left": left, "right": right, "decision": review["decision"],
         "review_reason": review["reason"], "accepted": not reasons,
-        "reasons": reasons or ["explicit_same_review_and_all_safety_checks_passed"],
+        "reasons": reasons or [ACCEPTANCE_EXPLANATION],
         "diagnostics": {
             "descriptive_only": True, "cosine_similarity": cosine,
             "left_interval": a["interval"], "right_interval": b["interval"],
