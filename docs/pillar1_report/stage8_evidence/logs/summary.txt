@@ -1,0 +1,9 @@
+﻿tests exit=0 seconds=56
+old_v3 exit=0 seconds=51
+new_v3 exit=0 seconds=19
+validate_v3 exit=0 seconds=1
+regress_v3 exit=0 seconds=3
+old_v1 exit=0 seconds=234
+new_v1 exit=0 seconds=351
+validate_v1 exit=0 seconds=9
+regress_v1 exit=0 seconds=22

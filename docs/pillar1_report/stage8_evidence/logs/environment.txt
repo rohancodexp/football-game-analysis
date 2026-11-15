@@ -1,0 +1,51 @@
+﻿date: 2026-11-15T17:40:22.3329455+05:30
+head: 2e73ce606a7a3fb1896e9f2f043c1c005015854b
+branch: feature/pillar1-stage8-regression
+origin/main: 2e73ce606a7a3fb1896e9f2f043c1c005015854b
+git status lines: 0
+python: Python 3.11.9
+pip: certifi==2026.10.23
+pip: charset-normalizer==3.5.2
+pip: cloudpickle==3.1.2
+pip: colorama==0.4.6
+pip: contourpy==1.3.3
+pip: cycler==0.12.1
+pip: filelock==4.2.10
+pip: fonttools==4.68.0
+pip: fsspec==2026.9.0
+pip: idna==3.20
+pip: Jinja2==3.1.6
+pip: joblib==1.6.0
+pip: kiwisolver==1.5.1
+pip: lap==0.5.14
+pip: MarkupSafe==3.0.4
+pip: matplotlib==3.11.2
+pip: mpmath==1.3.0
+pip: narwhals==2.28.0
+pip: networkx==3.6.1
+pip: numpy==2.4.6
+pip: opencv-python==4.14.0.94
+pip: packaging==26.3
+pip: pandas==3.1.1
+pip: pillow==13.0.0
+pip: psutil==7.2.2
+pip: py-cpuinfo==9.0.0
+pip: pyparsing==3.3.3
+pip: python-dateutil==4.0.0
+pip: PyYAML==6.0.3
+pip: requests==2.34.2
+pip: scikit-learn==1.9.1
+pip: scipy==1.17.1
+pip: seaborn==0.13.2
+pip: sympy==1.14.0
+pip: threadpoolctl==3.8.0
+pip: torch==2.15.0
+pip: torchvision==0.29.2
+pip: tqdm==4.70.1
+pip: typing_extensions==4.16.0
+pip: tzdata==2026.6
+pip: ultralytics==8.3.40
+pip: ultralytics-thop==2.2.5
+pip: urllib3==2.8.0
+video 1.mp4 sha256: b5b27dbe5fa936bef1e2f13658252906c96b00852046775eabd1b698661fe2c9
+video 3.mp4 sha256: 74a6d497615b21f243e66f6cba46846a7bfc4e5fda76fbbb62033373daaa90b9

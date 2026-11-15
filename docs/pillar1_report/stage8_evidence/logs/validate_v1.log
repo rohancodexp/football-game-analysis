@@ -1,0 +1,92 @@
+﻿{
+  "detections": {
+    "total_detection_rows": 9930,
+    "distinct_frames_with_detections": 987,
+    "largest_frame_index": 1036,
+    "frames_with_no_detection_in_processed_range": 50,
+    "detections_per_frame": {
+      "count": 987,
+      "min": 1.0,
+      "max": 25.0,
+      "mean": 10.0608,
+      "p10": 2.0,
+      "p50": 8.0,
+      "p90": 20.0,
+      "mode": [
+        [
+          3,
+          134
+        ],
+        [
+          2,
+          115
+        ],
+        [
+          1,
+          89
+        ]
+      ]
+    },
+    "unique_track_ids": 384,
+    "track_id_range": {
+      "min": 1,
+      "max": 1767
+    },
+    "detections_per_track": {
+      "count": 384,
+      "min": 1.0,
+      "max": 358.0,
+      "mean": 25.8594,
+      "p10": 1.0,
+      "p50": 10.0,
+      "p90": 61.0
+    },
+    "detector_confidence": {
+      "count": 9930,
+      "min": 0.3001,
+      "max": 0.9596,
+      "mean": 0.698,
+      "p10": 0.4821,
+      "p50": 0.7296,
+      "p90": 0.8576
+    },
+    "bbox": {
+      "non_finite_coordinates": 0,
+      "degenerate_or_inverted": 0,
+      "well_formed": 9930,
+      "width_height_note": "1280x720",
+      "area_px": {
+        "count": 9930,
+        "min": 230.2709,
+        "max": 607621.1304,
+        "mean": 33920.8401,
+        "p5": 1037.2999,
+        "p50": 2532.8948,
+        "p95": 278737.8318
+      },
+      "violates_left_or_top_boundary": 0,
+      "violates_right_or_bottom_boundary": 0,
+      "violates_any_boundary": 0,
+      "fraction_of_box_outside_frame": {
+        "count": 0
+      }
+    }
+  },
+  "render": {
+    "file": "C:\\Users\\lokes\\Desktop\\capstone\\football-game-analysis\\results\\stage8\\new_v1\\identified.mp4",
+    "exists": true,
+    "opened": true,
+    "size_bytes": 93608563,
+    "width": 1280,
+    "height": 720,
+    "fps": 15.0,
+    "frame_count_metadata": 1037,
+    "frames_decodable": 1037,
+    "matches_frames_processed": true,
+    "frames_processed": 1037,
+    "geometry_matches_source": true,
+    "fourcc_note": "written with mp4v; container frame count is codec-dependent"
+  }
+}
+Acceptance: PASS
+Full report: C:\Users\lokes\Desktop\capstone\football-game-analysis\results\stage8\validation_v1.json
