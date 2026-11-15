@@ -1,0 +1,684 @@
+{
+  "video": "datasets\\infactory_soccer_events\\data\\1.mp4",
+  "frames": 1037,
+  "fps": 15.0,
+  "detector": "yolov8n.pt",
+  "embedding": "torchvision ResNet18 ImageNet pretrained, NOT player-ReID trained",
+  "trained_in_this_project": false,
+  "ocr": null,
+  "threshold": 0.88,
+  "margin": 0.08,
+  "appearance_sampling": {
+    "rule": "per-fragment detection index",
+    "sample_every": 15,
+    "min_observations": 3,
+    "max_observations": 32,
+    "min_crop_height": 40,
+    "min_crop_width": 16
+  },
+  "detection_accounting": {
+    "enabled": true,
+    "accounting_version": "1.0",
+    "per_frame_file": "detection_accounting.jsonl",
+    "summary_file": "detection_accounting_summary.json",
+    "settings": {
+      "nms_conf": 0.3,
+      "nms_iou": 0.7,
+      "max_det": 300,
+      "imgsz": 960,
+      "classes": [
+        0
+      ],
+      "tracker": "bytetrack.yaml",
+      "track_high_thresh": 0.25,
+      "track_low_thresh": 0.1,
+      "new_track_thresh": 0.25,
+      "match_thresh": 0.8,
+      "track_buffer": 30,
+      "fuse_score": true
+    },
+    "raw_detections": 11693,
+    "emitted_detections": 9930,
+    "dropped_detections": 1763
+  },
+  "schema_version": "1.1",
+  "output_contract": {
+    "schema_version": "1.1",
+    "detection_id_format": "D{frame:06d}_{kind}{key:06d}_{seq:03d}, kind in T|N",
+    "detection_id_pattern": "^D\\d{6}_[TN]\\d{6,}_\\d{3}$",
+    "detection_id_key_kinds": {
+      "T": "key is the ByteTrack track_id",
+      "N": "key is the row ordinal, used only when no usable track_id exists"
+    },
+    "detection_id_rule": "The key is tagged T when derived from a track_id and N when derived from the row ordinal, so the two key sources cannot collide. seq is the 0-based occurrence count of the (frame, kind, key) triple within the run, which makes the full ID unique even if a tracker emits the same ID twice in one frame.",
+    "team_vocabulary": [
+      "TEAM_A",
+      "TEAM_B",
+      "UNKNOWN"
+    ],
+    "team_label_aliases": {
+      "": "UNKNOWN",
+      "UNK": "UNKNOWN",
+      "unk": "UNKNOWN",
+      "unknown": "UNKNOWN",
+      "none": "UNKNOWN",
+      "None": "UNKNOWN",
+      "team_a": "TEAM_A",
+      "Team_A": "TEAM_A",
+      "TEAMA": "TEAM_A",
+      "team_b": "TEAM_B",
+      "Team_B": "TEAM_B",
+      "TEAMB": "TEAM_B"
+    },
+    "non_canonical_team_labels_accepted": [
+      "AWAY",
+      "HOME"
+    ],
+    "player_id_unresolved": "UNK",
+    "detection_fields": [
+      "frame",
+      "timestamp_s",
+      "detection_id",
+      "track_id",
+      "fragment_id",
+      "bbox_xyxy",
+      "detector_confidence",
+      "class_id"
+    ],
+    "detection_identity_fields": [
+      "player_id",
+      "team_id",
+      "jersey",
+      "identification_confidence",
+      "identification_reason",
+      "person_uid",
+      "association_status",
+      "association_reason",
+      "association_method",
+      "team_score"
+    ],
+    "reserved_fields": [],
+    "deprecated_aliases": {
+      "confidence": "identification_confidence",
+      "reason": "identification_reason",
+      "player": "player_id"
+    },
+    "fields": {
+      "schema_version": {
+        "types": [
+          "str"
+        ],
+        "description": "explicit enriched contract version 1.1"
+      },
+      "frame": {
+        "types": [
+          "int"
+        ],
+        "description": "0-based video frame index"
+      },
+      "timestamp_s": {
+        "types": [
+          "int",
+          "float"
+        ],
+        "description": "frame / fps"
+      },
+      "detection_id": {
+        "types": [
+          "str"
+        ],
+        "description": "unique per detection within a run"
+      },
+      "bbox_xyxy": {
+        "types": [
+          "list"
+        ],
+        "description": "x1, y1, x2, y2 pixels"
+      },
+      "detector_confidence": {
+        "types": [
+          "int",
+          "float"
+        ],
+        "description": "YOLO confidence"
+      },
+      "class_id": {
+        "types": [
+          "int"
+        ],
+        "description": "detector class index"
+      },
+      "track_id": {
+        "types": [
+          "int"
+        ],
+        "description": "short-term ByteTrack trajectory"
+      },
+      "fragment_id": {
+        "types": [
+          "str"
+        ],
+        "description": "bounded segment of a trajectory"
+      },
+      "person_uid": {
+        "types": [
+          "str",
+          "NoneType"
+        ],
+        "description": "run-scoped anonymous association UID: P plus 32 lowercase hex characters, or null"
+      },
+      "player_id": {
+        "types": [
+          "str"
+        ],
+        "description": "roster ID or UNK; unchanged by anonymous association"
+      },
+      "jersey": {
+        "types": [
+          "int"
+        ],
+        "description": "OCR-derived jersey number, nullable"
+      },
+      "team_id": {
+        "types": [
+          "str"
+        ],
+        "description": "TEAM_A, TEAM_B or UNKNOWN; accepted roster club labels HOME/AWAY remain valid legacy compatibility values and are never mapped to TEAM_A/TEAM_B"
+      },
+      "identification_confidence": {
+        "types": [
+          "int",
+          "float"
+        ],
+        "description": "roster similarity score"
+      },
+      "identification_reason": {
+        "types": [
+          "str"
+        ],
+        "description": "why this identity decision"
+      },
+      "association_status": {
+        "types": [
+          "str"
+        ],
+        "description": "associated or unresolved"
+      },
+      "association_reason": {
+        "types": [
+          "str"
+        ],
+        "description": "nonempty association decision reason"
+      },
+      "association_method": {
+        "types": [
+          "str"
+        ],
+        "description": "human_reviewed_pair_clique when associated; abstain when unresolved"
+      },
+      "team_score": {
+        "types": [
+          "int",
+          "float"
+        ],
+        "description": "finite final team score in [0,1]; UNKNOWN requires zero"
+      }
+    },
+    "person_uid_pattern": "^P[0-9a-f]{32}$",
+    "required_identity_fields": [
+      "schema_version",
+      "person_uid",
+      "association_status",
+      "association_reason",
+      "association_method"
+    ],
+    "required_detection_fields": [
+      "schema_version",
+      "frame",
+      "bbox_xyxy",
+      "track_id",
+      "person_uid",
+      "player_id",
+      "team_id",
+      "association_status",
+      "association_reason",
+      "association_method",
+      "team_score"
+    ]
+  },
+  "raw_output_contract": {
+    "schema_version": "1.0",
+    "detection_id_format": "D{frame:06d}_{kind}{key:06d}_{seq:03d}, kind in T|N",
+    "detection_id_pattern": "^D\\d{6}_[TN]\\d{6,}_\\d{3}$",
+    "detection_id_key_kinds": {
+      "T": "key is the ByteTrack track_id",
+      "N": "key is the row ordinal, used only when no usable track_id exists"
+    },
+    "detection_id_rule": "The key is tagged T when derived from a track_id and N when derived from the row ordinal, so the two key sources cannot collide. seq is the 0-based occurrence count of the (frame, kind, key) triple within the run, which makes the full ID unique even if a tracker emits the same ID twice in one frame.",
+    "team_vocabulary": [
+      "TEAM_A",
+      "TEAM_B",
+      "UNKNOWN"
+    ],
+    "team_label_aliases": {
+      "": "UNKNOWN",
+      "UNK": "UNKNOWN",
+      "unk": "UNKNOWN",
+      "unknown": "UNKNOWN",
+      "none": "UNKNOWN",
+      "None": "UNKNOWN",
+      "team_a": "TEAM_A",
+      "Team_A": "TEAM_A",
+      "TEAMA": "TEAM_A",
+      "team_b": "TEAM_B",
+      "Team_B": "TEAM_B",
+      "TEAMB": "TEAM_B"
+    },
+    "non_canonical_team_labels_accepted": [
+      "AWAY",
+      "HOME"
+    ],
+    "player_id_unresolved": "UNK",
+    "detection_fields": [
+      "frame",
+      "timestamp_s",
+      "detection_id",
+      "track_id",
+      "fragment_id",
+      "bbox_xyxy",
+      "detector_confidence",
+      "class_id"
+    ],
+    "detection_identity_fields": [
+      "player_id",
+      "team_id",
+      "jersey",
+      "identification_confidence",
+      "identification_reason"
+    ],
+    "reserved_fields": [
+      "person_uid"
+    ],
+    "deprecated_aliases": {
+      "confidence": "identification_confidence",
+      "reason": "identification_reason",
+      "player": "player_id"
+    },
+    "fields": {
+      "schema_version": {
+        "types": [
+          "str"
+        ],
+        "description": "contract version stamped into reports"
+      },
+      "frame": {
+        "types": [
+          "int"
+        ],
+        "description": "0-based video frame index"
+      },
+      "timestamp_s": {
+        "types": [
+          "int",
+          "float"
+        ],
+        "description": "frame / fps"
+      },
+      "detection_id": {
+        "types": [
+          "str"
+        ],
+        "description": "unique per detection within a run"
+      },
+      "bbox_xyxy": {
+        "types": [
+          "list"
+        ],
+        "description": "x1, y1, x2, y2 pixels"
+      },
+      "detector_confidence": {
+        "types": [
+          "int",
+          "float"
+        ],
+        "description": "YOLO confidence"
+      },
+      "class_id": {
+        "types": [
+          "int"
+        ],
+        "description": "detector class index"
+      },
+      "track_id": {
+        "types": [
+          "int"
+        ],
+        "description": "short-term ByteTrack trajectory"
+      },
+      "fragment_id": {
+        "types": [
+          "str"
+        ],
+        "description": "bounded segment of a trajectory"
+      },
+      "person_uid": {
+        "types": [
+          "str"
+        ],
+        "description": "RESERVED - not implemented in Task 1.2"
+      },
+      "player_id": {
+        "types": [
+          "str"
+        ],
+        "description": "verified roster identity or UNK"
+      },
+      "jersey": {
+        "types": [
+          "int"
+        ],
+        "description": "OCR-derived jersey number, nullable"
+      },
+      "team_id": {
+        "types": [
+          "str"
+        ],
+        "description": "TEAM_A / TEAM_B / UNKNOWN"
+      },
+      "identification_confidence": {
+        "types": [
+          "int",
+          "float"
+        ],
+        "description": "roster similarity score"
+      },
+      "identification_reason": {
+        "types": [
+          "str"
+        ],
+        "description": "why this identity decision"
+      }
+    }
+  },
+  "artifact_schema_versions": {
+    "boxes.jsonl": "1.0",
+    "detection_accounting.jsonl": "1.0",
+    "identified_boxes.jsonl": "1.1",
+    "fragments.json": "1.1"
+  },
+  "input_video_sha256": "b5b27dbe5fa936bef1e2f13658252906c96b00852046775eabd1b698661fe2c9",
+  "boxes_sha256": "41eedbb6b4104474a3fea303d6051a0cedfc5f8591a0bbc1353d3452ef9dae7e",
+  "identity_association": {
+    "report_file": "identity_association_report.json",
+    "review_status": "not_supplied",
+    "review_sha256": null,
+    "method": "human_reviewed_pair_clique",
+    "counts": {
+      "fragments_total": 392,
+      "fragments_associated": 0,
+      "fragments_unresolved": 392,
+      "groups": 0,
+      "reviewed_fragments": 0,
+      "reviewed_pairs": 0,
+      "accepted_pairs": 0,
+      "rejected_pairs": 0,
+      "blocked_accepted_pairs": 0,
+      "unreviewed_pairs": 76636
+    },
+    "cross_file_validation": {
+      "valid": true,
+      "error_count": 0,
+      "errors": []
+    },
+    "accuracy_claim": null
+  },
+  "team_classification": {
+    "enabled": true,
+    "classifier": {
+      "module": "team_classifier.TeamAppearanceClassifier",
+      "min_samples": 12,
+      "min_cluster_samples": 4,
+      "max_iterations": 100,
+      "random_state": 17,
+      "outlier_multiplier": 1.35,
+      "minimum_radius": 0.12,
+      "use_grass_mask": false,
+      "min_foreground_ratio": 0.25,
+      "candidate_mode": "multi",
+      "candidate_action": "flag",
+      "candidate_threshold": 0.5
+    },
+    "filter_policy": {
+      "min_confidence": 0.45,
+      "min_box_height": 50,
+      "max_box_height": 160,
+      "min_box_width": 14,
+      "max_box_width": null,
+      "max_box_area_fraction": 0.025,
+      "max_aspect_ratio": 0.9,
+      "min_aspect_ratio": null,
+      "min_crop_height": 14,
+      "min_crop_width": 8
+    },
+    "crop_collection": {
+      "fragments_total": 392,
+      "fragments_with_crops": 221,
+      "crops_stored": 894,
+      "box_filter": {
+        "total_evaluated": 2176,
+        "unique_accepted": 1519,
+        "unique_rejected": 657,
+        "rejection_reasons_overlapping": {
+          "box_too_short": 164,
+          "low_detector_confidence": 199,
+          "box_too_narrow": 3,
+          "aspect_ratio_too_high": 141,
+          "box_too_tall": 351,
+          "box_area_too_large": 297
+        },
+        "primary_rejection_reasons": {
+          "box_too_short": 126,
+          "low_detector_confidence": 199,
+          "aspect_ratio_too_high": 11,
+          "box_too_tall": 313,
+          "box_area_too_large": 8
+        },
+        "rejection_combinations": {
+          "box_too_short": 110,
+          "box_too_short+low_detector_confidence": 32,
+          "low_detector_confidence": 113,
+          "box_too_narrow+box_too_short+low_detector_confidence": 2,
+          "aspect_ratio_too_high+box_too_short+low_detector_confidence": 4,
+          "aspect_ratio_too_high": 11,
+          "aspect_ratio_too_high+box_too_short": 16,
+          "aspect_ratio_too_high+low_detector_confidence": 7,
+          "box_too_narrow+low_detector_confidence": 1,
+          "aspect_ratio_too_high+box_area_too_large+box_too_tall": 81,
+          "aspect_ratio_too_high+box_area_too_large+box_too_tall+low_detector_confidence": 12,
+          "box_area_too_large+box_too_tall": 169,
+          "box_area_too_large+box_too_tall+low_detector_confidence": 25,
+          "aspect_ratio_too_high+box_area_too_large+low_detector_confidence": 2,
+          "box_too_tall": 63,
+          "box_too_tall+low_detector_confidence": 1,
+          "aspect_ratio_too_high+box_area_too_large": 8
+        }
+      },
+      "torso_filter": {
+        "total_evaluated": 1519,
+        "unique_accepted": 1519,
+        "unique_rejected": 0,
+        "rejection_reasons_overlapping": {},
+        "primary_rejection_reasons": {},
+        "rejection_combinations": {}
+      },
+      "sampled_detections": 2176
+    },
+    "fit": {
+      "fitted": true,
+      "fitting_crops": 370,
+      "max_crops_per_fit_fragment": 2,
+      "error": null,
+      "cluster_fingerprint": "97014eb28ac8a04e",
+      "valid_samples": 353,
+      "fitting_set_candidate_gated": 17,
+      "cluster_sizes": {
+        "TEAM_A": 222,
+        "TEAM_B": 131
+      },
+      "mean_within_cluster_distance": {
+        "TEAM_A": 0.4239690601825714,
+        "TEAM_B": 0.3257361352443695
+      },
+      "outlier_radii": {
+        "TEAM_A": 0.8663536310195923,
+        "TEAM_B": 0.707618772983551
+      },
+      "labeling_rule": "anchor_crop",
+      "anchor_crop_id": "F000387#1"
+    },
+    "aggregation": {
+      "min_votes": 2,
+      "min_majority": 0.6,
+      "candidate_support_ratio": 0.6,
+      "candidate_mean_score_floor": 0.75,
+      "score_kind": "distance_to_radius_heuristic_not_probability"
+    },
+    "fragment_label_distribution": {
+      "UNKNOWN": 392
+    },
+    "fragment_evidence_status_distribution": {
+      "conflicting_fragment_votes": 1,
+      "insufficient_fragment_votes": 70,
+      "mixed_fragment_appearance": 22,
+      "no_accepted_crop_predictions": 7,
+      "no_torso_crops": 171,
+      "persistent_role_candidate": 4,
+      "uncalibrated_team_separation": 117
+    },
+    "detection_label_distribution": {
+      "UNKNOWN": 9930
+    },
+    "fragments_excluded_as_role_candidates": 4,
+    "cluster_separation_check": {
+      "decision": "inconclusive",
+      "reason": "uncalibrated_team_separation",
+      "checks": {},
+      "metrics": {
+        "feature_version": "hsv_lab_v1",
+        "centroid_distance": 0.6710108740561029,
+        "min_cluster_fraction": 0.37110481586402266,
+        "max_within_radius": 0.7909708809401386,
+        "mean_margin": 0.3949622532663237,
+        "min_seed_agreement": 0.9858356940509915,
+        "outlier_fraction": 0.0,
+        "clusters": [
+          {
+            "cluster": 0,
+            "count": 222,
+            "within_distances": {
+              "rms": 0.45110043103006764,
+              "quantiles": {
+                "q0": 0.1796250711366408,
+                "q25": 0.2963843100341152,
+                "q50": 0.3917958979017922,
+                "q75": 0.5305511877204582,
+                "q90": 0.6417434504957649,
+                "q95": 0.7384285369656209,
+                "q100": 0.7909708809401386
+              }
+            },
+            "other_distances": {
+              "rms": 0.8085463567692639,
+              "quantiles": {
+                "q0": 0.4372765885693753,
+                "q25": 0.7364066693884754,
+                "q50": 0.7853472036402879,
+                "q75": 0.8543942911888596,
+                "q90": 0.9456870905065825,
+                "q95": 1.0161607686621361,
+                "q100": 1.0833817503765926
+              }
+            },
+            "margins": {
+              "rms": 0.40181870394529556,
+              "quantiles": {
+                "q0": 0.008339487114026212,
+                "q25": 0.2953149302618031,
+                "q50": 0.39504966374736766,
+                "q75": 0.496152623839598,
+                "q90": 0.5308877877505271,
+                "q95": 0.5459511327341632,
+                "q100": 0.5948892000252589
+              }
+            }
+          },
+          {
+            "cluster": 1,
+            "count": 131,
+            "within_distances": {
+              "rms": 0.3476988722147389,
+              "quantiles": {
+                "q0": 0.14372064468512327,
+                "q25": 0.23654975617883148,
+                "q50": 0.2990927892424362,
+                "q75": 0.3907481813602869,
+                "q90": 0.5241620539205609,
+                "q95": 0.5851940159976198,
+                "q100": 0.6306110646169769
+              }
+            },
+            "other_distances": {
+              "rms": 0.7557447877756475,
+              "quantiles": {
+                "q0": 0.44500581102969816,
+                "q25": 0.699285669060596,
+                "q50": 0.744254451411611,
+                "q75": 0.8002742987110867,
+                "q90": 0.8681394771194418,
+                "q95": 0.9074060506508204,
+                "q100": 1.0354123909950808
+              }
+            },
+            "margins": {
+              "rms": 0.4511589299942493,
+              "quantiles": {
+                "q0": 0.0071732540835999226,
+                "q25": 0.33756468045586085,
+                "q50": 0.4907870653761076,
+                "q75": 0.539809472673308,
+                "q90": 0.5687627564083917,
+                "q95": 0.5842676097673474,
+                "q100": 0.6197189269718791
+              }
+            }
+          }
+        ],
+        "cluster_ball_gap": -0.7505710715010125,
+        "initialization_trials": 3
+      },
+      "calibration": null
+    },
+    "uncalibrated_proposal_distribution": {
+      "TEAM_A": 87,
+      "TEAM_B": 52,
+      "UNKNOWN": 253
+    },
+    "calibration": null,
+    "mixed_fragments": 22,
+    "runtime_seconds": {
+      "crop_collection": 0.3606,
+      "fit_and_predict": 1.5835
+    },
+    "semantics": "TEAM_A / TEAM_B are anonymous deterministic cluster slots of this fit, not club names and not automatically HOME / AWAY. They are only comparable within one run and carry no meaning across unrelated videos.",
+    "accuracy_claim": null,
+    "input_video_sha256": "b5b27dbe5fa936bef1e2f13658252906c96b00852046775eabd1b698661fe2c9",
+    "saved_crop_index": {
+      "file": "team_crop_index.json",
+      "crops_dir": "team_crops",
+      "samples": 894,
+      "crop_write_failures": 0
+    }
+  },
+  "identity_fields_note": "person_uid is a run-scoped anonymous association UID, emitted only for human-reviewed accepted groups and null otherwise; it is not a real-world identity and does not change player_id or team_id. team_id is now an independent kit-cluster classification and does not depend on roster identification (the roster-inherited value is kept per fragment under team_classification.roster_inherited_team_id)",
+  "scope": "LTPI-inspired prototype; not official LTPI reproduction"
+}

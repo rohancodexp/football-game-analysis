@@ -252,3 +252,59 @@ No existing test was removed or weakened. No YOLO, ByteTrack, fragmenting, appea
 **Not done yet (Stage 8).** No full-video run of the new code on the Stage 2 clips (`1.mp4`, `3.mp4`) and no comparison against `results/stage2_final_v1` / `results/stage2_final_v3`; those files are not in this workspace. No human identity review of a real clip exists, so no real `person_uid` link has been produced. No identity precision/recall, IDF1 or other accuracy figure is claimed. When the clips are available: run the no-review pipeline into a new output directory, run `validate_tracking_outputs.py --require-render`, then `validate_pillar1_regression.py` against the matching baseline; record the results here as a new section without editing earlier ones.
 
 **Acceptance decision:** Stages 5A-6 are code-complete with unit and synthetic integration evidence. Pillar 1 is not accepted until Stage 8 video regression passes and the team reviews this branch. Do not merge into `main` before that.
+
+## 13. Stage 8: full-video regression of merged main (2026-11-15)
+
+**Code under test:** `main` at merge `2e73ce606a7a3fb1896e9f2f043c1c005015854b` (PR #5, by Rishi-Jayprakash06). Parents `4ad4329` (previous main) and `f4d88f6` (Stage 7). Its tree is identical to `f4d88f6`; working tree clean (`git status` 0 lines) when the runs started.
+
+**Environment:** Lokesh's laptop, Windows, Python 3.11.9 `.venv`, CPU only: torch 2.15.0, torchvision 0.29.2, ultralytics 8.3.40, opencv-python 4.14.0.94, numpy 2.4.6, lap 0.5.14. Full `pip freeze` in `stage8_evidence/logs/environment.txt`. Runtimes below are wall-clock on a non-dedicated laptop, not benchmarks.
+
+**Inputs:** `datasets/infactory_soccer_events/data/1.mp4` (SHA256 `b5b27dbe5fa936bef1e2f13658252906c96b00852046775eabd1b698661fe2c9`) and `3.mp4` (`74a6d497615b21f243e66f6cba46846a7bfc4e5fda76fbbb62033373daaa90b9`).
+
+**Method.** The Stage 2 baseline folders `results/stage2_final_v1` / `v3` were not available on this machine. Instead, the pre-Stage-5 code (`git archive 4ad4329`, the code whose outputs matched Stage 2 byte-for-byte at the 4A/4B checkpoints in section 6) and the merged main were both run on each video, same machine, same command, fresh output directories, no review file:
+
+`run.py --video <v> --out <dir> --render --team-save-crops`
+
+then `validate_tracking_outputs.py --require-render` on the new output and `validate_pillar1_regression.py --baseline <old> --candidate <new>` (no `--allow-render-change`). The script that ran all steps is `stage8_evidence/stage8.ps1`; all logs are in `stage8_evidence/logs/`.
+
+| Step | Exit | Wall time |
+|---|---|---|
+| Full unit suite (440 tests, OK, 2 skips) | 0 | 56 s |
+| Video 3: old code / new code | 0 / 0 | 51 s / 19 s |
+| Video 3: validator `--require-render` / regression gate | 0 (Acceptance PASS) / 0 (PASS) | 1 s / 3 s |
+| Video 1: old code / new code | 0 / 0 | 234 s / 351 s |
+| Video 1: validator `--require-render` / regression gate | 0 (Acceptance PASS) / 0 (PASS) | 9 s / 22 s |
+
+**Results against the Stage 2 / Stage 4B table in section 6** (identical in old and new runs):
+
+| Measure | Video 1 | Video 3 | Matches section 6 |
+|---|---:|---:|---|
+| Processed / decodable render frames | 1,037 / 1,037 | 76 / 76 | yes |
+| Render geometry / FPS | 1280x720 / 15 | 1280x720 / 15 | yes |
+| Emitted detection rows | 9,930 | 1,033 | yes |
+| Raw / dropped detections | 11,693 / 1,763 | 1,087 / 54 | yes |
+| Fragments | 392 | 30 | yes |
+| Fragment / detection team UNKNOWN (4B gate, no calibration) | 392 / 9,930 | 30 / 1,033 | yes |
+| `player_id` (no roster) | all `UNK` | all `UNK` | expected |
+| Fragments with null embedding (insufficient appearance evidence) | 295 | 14 | not recorded in section 6 |
+| `person_uid` non-null | 0 | 0 | expected (no review) |
+
+**Old vs new (regression gate), both videos:** passed, no errors. Byte-identical `boxes.jsonl`, `detection_accounting.jsonl`, `detection_accounting_summary.json`, `players.json` and `identified.mp4` (render status `identical`). Detection and fragment records: same counts, 0 changed fields; new fields exactly `schema_version`, `person_uid`, `association_status`, `association_reason`, `association_method`. All 894 (video 1) and 125 (video 3) saved team crops byte-identical.
+
+| File (old = new) | Video 1 SHA256 | Video 3 SHA256 |
+|---|---|---|
+| `boxes.jsonl` | `41eedbb6b4104474a3fea303d6051a0cedfc5f8591a0bbc1353d3452ef9dae7e` | `b08458d2b135b61cdb7de4f2eea895d1288dcabcb9007d8b61d8c8d6be8c5502` |
+| `detection_accounting.jsonl` | `bfaf980d3e730913dfaeb8887e163d8d1fa8373a675393629d851f0d87825fcb` | `0574a1b9fe877f6fd7950e7d148eed409ca90a3eb08fc46c589a32e3794d0284` |
+| `detection_accounting_summary.json` | `065804c833d31a0e32826a9de09b52379b5c9e3b2a16b531e115494e2cdedc42` | `4445d5e42b1a05ea745cd699df5fc5d8df858b4debd9107a671410824f14770b` |
+| `players.json` | `a9fb9f5162eb25495a3d08cfff88dbccf2b1cbcfab3518fef05d15e7523b04df` | `c7f98f69ba1a30db076a91af513a28956db7e658bcc5419c90b946cde0ba763e` |
+| `identified.mp4` | `ec27c548cbccea2d30f9fd502aeb87e7b1cf429f0f8e51a2460a7d7e99fc56b2` | `1d3018eb5eba8aa68b8dfbf1dace894e18f34af68494d5c2fce2de688c2fc0c4` |
+
+Other old/new differences, all inspected and expected: `team_classification_report.json` differs only in `runtime_seconds.crop_collection` and `runtime_seconds.fit_and_predict` (timing); `team_crop_index.json` differs only by the output directory name inside crop paths (identical after replacing `old_vN`/`new_vN`); `run_manifest.json` (new 1.1 contract, digests, identity block); `identity_association_report.json` exists only in the new run (`review_status: not_supplied`, 0 groups, 392 / 30 fragments unresolved, `accuracy_claim: null`).
+
+**Discrepancy: Stage 2 raw-box hash.** The recorded Stage 2 raw-box SHA256 (section 6: video 1 `49edd666…`, video 3 `939e3ac7…`) does **not** match this machine's `boxes.jsonl` (`41eedbb6…`, `b08458d2…`). Line endings do not explain it: these files use CRLF, and the LF-normalised hashes (`31316c8d…`, `4d1ed26e…`) also differ. Every count above matches exactly, so the difference is in record content, most likely floating-point box coordinates/confidences from a different CPU, or library differences (`lap` 0.5.14 here vs the manually installed `lapx` recorded in section 11). This could not be resolved without the Stage 2 baseline files. Within this machine, old and new code are byte-identical, so the merged changes did not cause it. **Action:** a teammate with `results/stage2_final_v1` / `v3` should run `validate_pillar1_regression.py --baseline results/stage2_final_vN --candidate <fresh run of 2e73ce6>` on the machine that produced those baselines and record the result here.
+
+**Evidence files** (`docs/pillar1_report/stage8_evidence/`): `regression_v1.json` (`98e02a74f94cf5ef2036c7f2eda5716784aa6780717bce8288b15277bf5a6e66`), `regression_v3.json` (`d032aef24bc48fc22d3d404f686307b0f5a29c27e34d1c0b3d2b50163c469501`), `validation_v1.json` (`8782fdc1f5ea5277080d5b3eb040cc35338952a08451c99295f479718e6ab6d9`), `validation_v3.json` (`9701388c9b33f33aa27606f7751f66fda1d52c56700ab6d8c96267bcb29d6564`), `run_manifest_v1.json`, `run_manifest_v3.json`, `logs/` (test log, per-step logs, environment) and `stage8.ps1`. The full output directories remain under the gitignored `results/stage8/` on Lokesh's laptop.
+
+**Review of the evidence.** Detection accounting, tracking, fragment boundaries, player resolution and team classification did not regress between the pre-Stage-5 code and merged main on either full video; the only changes are the intended additive identity fields and report. The all-`UNK` / all-`UNKNOWN` labels are the pre-existing, designed abstentions (no roster, no team calibration, no identity review), not regressions.
+
+**Acceptance decision.** Stage 8 passes as a same-machine old-vs-new regression. Pillar 1 should be declared complete only after (a) the Stage 2 byte comparison above is run where the baselines live, and (b) the team agrees that abstention is the accepted Pillar 1 output. Persistent non-`UNK` player and team labels (roster, team calibration, reviewed or automatic association) are new work, not part of this regression.

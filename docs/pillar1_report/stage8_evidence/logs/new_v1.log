@@ -1,0 +1,6 @@
+﻿Processed 300 frames
+Processed 600 frames
+Processed 900 frames
+Identity association: review=not_supplied groups=0 associated=0 unresolved=392 cross_file_valid=True
+Team classification: fit=True fingerprint=97014eb28ac8a04e fragments={'UNKNOWN': 392} detections={'UNKNOWN': 9930}
+Finished: 392 fragments. Outputs in C:\Users\lokes\Desktop\capstone\football-game-analysis\results\stage8\new_v1

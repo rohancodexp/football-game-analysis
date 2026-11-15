@@ -1,0 +1,652 @@
+{
+  "scope_note": "Structural validation of detection/tracking output. No per-frame ground-truth annotations exist for these inputs, so no tracking accuracy, IDF1, MOTA or ID-switch rate is reported or implied.",
+  "inputs": {
+    "video": {
+      "opened": true,
+      "path": "datasets\\infactory_soccer_events\\data\\3.mp4",
+      "width": 1280,
+      "height": 720,
+      "fps_metadata": 15.0,
+      "frame_count_metadata": 76,
+      "duration_s_metadata": 5.0667,
+      "frames_decoded_by_sequential_read": 76,
+      "duration_s_decoded": 5.0667,
+      "metadata_matches_decode": true
+    },
+    "run_dir": "C:\\Users\\lokes\\Desktop\\capstone\\football-game-analysis\\results\\stage8\\new_v3",
+    "manifest": {
+      "video": "datasets\\infactory_soccer_events\\data\\3.mp4",
+      "frames": 76,
+      "fps": 15.0,
+      "detector": "yolov8n.pt",
+      "threshold": 0.88,
+      "margin": 0.08,
+      "ocr": null
+    }
+  },
+  "detections": {
+    "total_detection_rows": 1033,
+    "distinct_frames_with_detections": 61,
+    "largest_frame_index": 75,
+    "frames_with_no_detection_in_processed_range": 15,
+    "detections_per_frame": {
+      "count": 61,
+      "min": 1.0,
+      "max": 23.0,
+      "mean": 16.9344,
+      "p10": 1.0,
+      "p50": 20.0,
+      "p90": 22.0,
+      "mode": [
+        [
+          20,
+          21
+        ],
+        [
+          19,
+          14
+        ],
+        [
+          1,
+          8
+        ]
+      ],
+      "histogram": {
+        "bin_edges": [
+          1,
+          2,
+          3,
+          5,
+          8,
+          12,
+          16
+        ],
+        "counts": [
+          0,
+          8,
+          1,
+          1,
+          0,
+          1,
+          0,
+          50
+        ],
+        "labels": [
+          "<1",
+          "1-2",
+          "2-3",
+          "3-5",
+          "5-8",
+          "8-12",
+          "12-16",
+          ">=16"
+        ]
+      }
+    },
+    "unique_track_ids": 30,
+    "track_id_range": {
+      "min": 1,
+      "max": 54
+    },
+    "detections_per_track": {
+      "count": 30,
+      "min": 1.0,
+      "max": 52.0,
+      "mean": 34.4333,
+      "p10": 2.9,
+      "p50": 50.0,
+      "p90": 51.0
+    },
+    "detector_confidence": {
+      "count": 1033,
+      "min": 0.3103,
+      "max": 0.9084,
+      "mean": 0.717,
+      "p10": 0.5921,
+      "p50": 0.7239,
+      "p90": 0.8385
+    },
+    "bbox": {
+      "non_finite_coordinates": 0,
+      "degenerate_or_inverted": 0,
+      "well_formed": 1033,
+      "width_height_note": "1280x720",
+      "area_px": {
+        "count": 1033,
+        "min": 501.3898,
+        "max": 487854.9323,
+        "mean": 5319.6467,
+        "p5": 618.5741,
+        "p50": 1160.9068,
+        "p95": 2606.6542
+      },
+      "violates_left_or_top_boundary": 0,
+      "violates_right_or_bottom_boundary": 0,
+      "violates_any_boundary": 0,
+      "fraction_of_box_outside_frame": {
+        "count": 0
+      }
+    }
+  },
+  "timestamps": {
+    "rows": 1033,
+    "missing_timestamp_s": 0,
+    "non_numeric_timestamp_s": 0,
+    "negative_timestamp_s": 0,
+    "non_finite_timestamp_s": 0,
+    "timestamp_not_equal_to_frame_divided_by_fps": 0,
+    "fps_used_by_writer": 15.0,
+    "non_monotonic_within_same_frame": 0,
+    "frame_index_types": [
+      "int"
+    ],
+    "span_s": {
+      "first": 0.0,
+      "last": 5.0
+    }
+  },
+  "track_continuity": {
+    "note": "Structural measure only: a track id absent for k frames is an interruption, not proof of an identity change.",
+    "tracks": 30,
+    "tracks_with_no_interruption": 25,
+    "interruptions_per_track": {
+      "count": 30,
+      "min": 0.0,
+      "max": 2.0,
+      "mean": 0.2667,
+      "p50": 0.0,
+      "p90": 1.1
+    },
+    "total_interruptions": 8,
+    "longest_absence_per_track_frames": {
+      "count": 28,
+      "min": 1.0,
+      "max": 6.0,
+      "mean": 1.5714,
+      "p50": 1.0,
+      "p90": 4.0
+    },
+    "absence_length_histogram": {
+      "2": 2,
+      "3": 1,
+      "4": 2,
+      "5": 2,
+      "6": 1
+    },
+    "interruptions_at_or_above_fragment_gap": 0,
+    "fragment_gap_setting_frames": 30
+  },
+  "id_switch_heuristic": {
+    "interpretation": "Counts of 0.35+ IoU box continuity between a vanished id and a newly appearing id (candidate handoff), and of two ids overlapping in one frame. Unvalidated heuristic: no annotated IDs exist to confirm or refute any switch.",
+    "candidate_handoffs": 7,
+    "candidate_handoffs_per_100_frames": 11.475,
+    "distinct_tracks_receiving_a_candidate_handoff": 4,
+    "tracks_receiving_more_than_one": {
+      "29": 2,
+      "45": 3
+    },
+    "handoff_iou": {
+      "count": 7,
+      "min": 0.5112,
+      "max": 0.7636,
+      "mean": 0.6452,
+      "p50": 0.6511,
+      "p90": 0.7505
+    },
+    "strongest_examples": [
+      {
+        "frame": 74,
+        "from_track_id": 29,
+        "to_track_id": 45,
+        "iou": 0.7636
+      },
+      {
+        "frame": 71,
+        "from_track_id": 36,
+        "to_track_id": 54,
+        "iou": 0.7417
+      },
+      {
+        "frame": 32,
+        "from_track_id": 28,
+        "to_track_id": 29,
+        "iou": 0.6922
+      },
+      {
+        "frame": 34,
+        "from_track_id": 29,
+        "to_track_id": 28,
+        "iou": 0.6511
+      },
+      {
+        "frame": 59,
+        "from_track_id": 29,
+        "to_track_id": 45,
+        "iou": 0.6251
+      },
+      {
+        "frame": 26,
+        "from_track_id": 18,
+        "to_track_id": 29,
+        "iou": 0.5314
+      },
+      {
+        "frame": 65,
+        "from_track_id": 29,
+        "to_track_id": 45,
+        "iou": 0.5112
+      }
+    ],
+    "same_frame_high_overlap_pairs": 19,
+    "same_frame_overlap_examples": [
+      {
+        "frame": 74,
+        "track_ids": [
+          29,
+          45
+        ],
+        "iou": 0.7774
+      },
+      {
+        "frame": 71,
+        "track_ids": [
+          36,
+          54
+        ],
+        "iou": 0.6802
+      },
+      {
+        "frame": 65,
+        "track_ids": [
+          29,
+          45
+        ],
+        "iou": 0.6553
+      },
+      {
+        "frame": 66,
+        "track_ids": [
+          29,
+          45
+        ],
+        "iou": 0.6515
+      },
+      {
+        "frame": 62,
+        "track_ids": [
+          29,
+          45
+        ],
+        "iou": 0.6499
+      },
+      {
+        "frame": 61,
+        "track_ids": [
+          29,
+          45
+        ],
+        "iou": 0.6448
+      },
+      {
+        "frame": 59,
+        "track_ids": [
+          29,
+          45
+        ],
+        "iou": 0.644
+      },
+      {
+        "frame": 60,
+        "track_ids": [
+          29,
+          45
+        ],
+        "iou": 0.6406
+      },
+      {
+        "frame": 32,
+        "track_ids": [
+          28,
+          29
+        ],
+        "iou": 0.6373
+      },
+      {
+        "frame": 63,
+        "track_ids": [
+          29,
+          45
+        ],
+        "iou": 0.6363
+      }
+    ]
+  },
+  "fragments": {
+    "fragments": 30,
+    "fragments_per_track": {
+      "single_fragment": 30,
+      "multi_fragment": 0,
+      "max": 1,
+      "distribution": {
+        "count": 30,
+        "min": 1.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "p50": 1.0,
+        "p90": 1.0
+      }
+    },
+    "duration_s": {
+      "count": 30,
+      "min": 0.0,
+      "max": 3.4,
+      "mean": 2.28,
+      "p10": 0.1267,
+      "p25": 0.7667,
+      "p50": 3.2667,
+      "p75": 3.3333,
+      "p90": 3.3333
+    },
+    "duration_histogram": {
+      "bin_edges": [
+        0.2,
+        0.5,
+        1.0,
+        2.0,
+        5.0,
+        10.0,
+        14.9
+      ],
+      "counts": [
+        4,
+        2,
+        2,
+        3,
+        19,
+        0,
+        0,
+        0
+      ],
+      "labels": [
+        "<0.2",
+        "0.2-0.5",
+        "0.5-1.0",
+        "1.0-2.0",
+        "2.0-5.0",
+        "5.0-10.0",
+        "10.0-14.9",
+        ">=14.9"
+      ]
+    },
+    "span_frames": {
+      "count": 30,
+      "min": 0.0,
+      "max": 51.0,
+      "mean": 34.2,
+      "p10": 1.9,
+      "p50": 49.0,
+      "p90": 50.0
+    },
+    "zero_length_fragments": 0,
+    "inverted_fragments": 0,
+    "fragments_at_max_duration_cap": 0,
+    "max_duration_cap_s": 15.0,
+    "fragment_gap_setting_frames": 30,
+    "unique_fragment_ids": 30,
+    "fragment_ids_matching_pattern": 30,
+    "embeddings_present": 16,
+    "embeddings_missing": 14,
+    "jersey_ocr_values": {
+      "None": 30
+    },
+    "player_id_values": {
+      "UNK": 30
+    },
+    "team_id_values": {
+      "UNKNOWN": 30
+    }
+  },
+  "output_consistency": {
+    "boxes_rows": 1033,
+    "identified_rows": 1033,
+    "row_count_equal": true,
+    "detection_ids_match": true,
+    "fragment_ids_unique": true,
+    "detection_id_unique_in_boxes": true,
+    "detection_id_unique_in_identified": true,
+    "fragment_ids_referenced_by_boxes_not_in_fragments": [],
+    "fragment_ids_in_fragments_never_written": [],
+    "boxes_vs_identified_fragment_ids": {
+      "only_in_boxes": 0,
+      "only_in_identified": 0
+    },
+    "spatiotemporal_field_drift_between_files": {}
+  },
+  "detection_accounting": {
+    "accounting_version": "1.0",
+    "records": 76,
+    "valid": true,
+    "error_count": 0,
+    "errors": [],
+    "totals": {
+      "raw_detections": 1087,
+      "emitted_detections": 1033,
+      "dropped_detections": 54,
+      "raw_high_conf": 1087,
+      "raw_low_conf": 0,
+      "raw_below_low": 0,
+      "frames_raw_zero": 13,
+      "frames_with_drop": 28,
+      "frames_tracker_update_skipped": 13
+    },
+    "summary": {
+      "exists": true,
+      "accounting_version": "1.0",
+      "frames_processed": 76,
+      "totals_agree_with_records": true,
+      "consistency_all_hold": true,
+      "consistency_violations": [],
+      "rates": {
+        "emission_rate": 0.9503219871205152,
+        "drop_rate": 0.04967801287948481
+      },
+      "not_measured_present": true
+    },
+    "checks": {
+      "one_record_per_processed_frame": true,
+      "frame_indices_sequential": true,
+      "bands_are_mutually_exclusive_and_sum_to_raw": true,
+      "emitted_le_raw": true,
+      "dropped_equals_raw_minus_emitted": true,
+      "emitted_equals_boxes_rows": true,
+      "emitted_equals_identified_rows": true,
+      "skipped_equals_zero_raw_frames": true,
+      "emitted_ids_match_emitted_count": true,
+      "summary_agrees_with_records": true
+    },
+    "check_count_failed": 0
+  },
+  "render": {
+    "file": "C:\\Users\\lokes\\Desktop\\capstone\\football-game-analysis\\results\\stage8\\new_v3\\identified.mp4",
+    "exists": true,
+    "opened": true,
+    "size_bytes": 4919869,
+    "width": 1280,
+    "height": 720,
+    "fps": 15.0,
+    "frame_count_metadata": 76,
+    "frames_decodable": 76,
+    "matches_frames_processed": true,
+    "frames_processed": 76,
+    "geometry_matches_source": true,
+    "fourcc_note": "written with mp4v; container frame count is codec-dependent"
+  },
+  "schema": {
+    "boxes.jsonl": {
+      "exists": true,
+      "required_level": {
+        "schema_version": "1.0",
+        "row_schema_versions": [
+          "1.0"
+        ],
+        "level": "required",
+        "records": 1033,
+        "valid": true,
+        "error_count": 0,
+        "warning_count": 0,
+        "errors": [],
+        "warnings": [],
+        "team_id_values": {
+          "<absent>": 1033
+        },
+        "player_id_values": {
+          "<absent>": 1033
+        },
+        "detection_id": {
+          "total_records": 1033,
+          "records_with_detection_id": 1033,
+          "records_with_canonical_format": 1033,
+          "unique_detection_ids": 1033,
+          "duplicate_detection_ids": [],
+          "missing_detection_id": 0
+        }
+      },
+      "strict_level": {
+        "schema_version": "1.0",
+        "row_schema_versions": [
+          "1.0"
+        ],
+        "level": "strict",
+        "records": 1033,
+        "valid": true,
+        "error_count": 0,
+        "warning_count": 0,
+        "errors": [],
+        "warnings": [],
+        "team_id_values": {
+          "<absent>": 1033
+        },
+        "player_id_values": {
+          "<absent>": 1033
+        },
+        "detection_id": {
+          "total_records": 1033,
+          "records_with_detection_id": 1033,
+          "records_with_canonical_format": 1033,
+          "unique_detection_ids": 1033,
+          "duplicate_detection_ids": [],
+          "missing_detection_id": 0
+        }
+      }
+    },
+    "identified_boxes.jsonl": {
+      "exists": true,
+      "required_level": {
+        "schema_version": "1.0",
+        "row_schema_versions": [
+          "1.1"
+        ],
+        "level": "required",
+        "records": 1033,
+        "valid": true,
+        "error_count": 0,
+        "warning_count": 0,
+        "errors": [],
+        "warnings": [],
+        "team_id_values": {
+          "UNKNOWN": 1033
+        },
+        "player_id_values": {
+          "UNK": 1033
+        },
+        "detection_id": {
+          "total_records": 1033,
+          "records_with_detection_id": 1033,
+          "records_with_canonical_format": 1033,
+          "unique_detection_ids": 1033,
+          "duplicate_detection_ids": [],
+          "missing_detection_id": 0
+        }
+      },
+      "strict_level": {
+        "schema_version": "1.0",
+        "row_schema_versions": [
+          "1.1"
+        ],
+        "level": "strict",
+        "records": 1033,
+        "valid": true,
+        "error_count": 0,
+        "warning_count": 0,
+        "errors": [],
+        "warnings": [],
+        "team_id_values": {
+          "UNKNOWN": 1033
+        },
+        "player_id_values": {
+          "UNK": 1033
+        },
+        "detection_id": {
+          "total_records": 1033,
+          "records_with_detection_id": 1033,
+          "records_with_canonical_format": 1033,
+          "unique_detection_ids": 1033,
+          "duplicate_detection_ids": [],
+          "missing_detection_id": 0
+        }
+      }
+    },
+    "run_manifest.json": {
+      "exists": true,
+      "schema_version": "1.1",
+      "has_output_contract_descriptor": true,
+      "declares_trained_in_this_project": false,
+      "identity_fields_note_present": true,
+      "embedding_descriptor": "torchvision ResNet18 ImageNet pretrained, NOT player-ReID trained"
+    }
+  },
+  "identity_association": {
+    "applicable": true,
+    "valid": true,
+    "error_count": 0,
+    "errors": [],
+    "groups": 0,
+    "fragments": 30,
+    "associated_fragments": 0,
+    "unresolved_fragments": 30,
+    "note": "Cross-file consistency, not real-world identity accuracy."
+  },
+  "acceptance": {
+    "passed": true,
+    "checks": {
+      "schema.boxes.jsonl.exists": true,
+      "schema.boxes.jsonl.strict_valid": true,
+      "schema.identified_boxes.jsonl.exists": true,
+      "schema.identified_boxes.jsonl.strict_valid": true,
+      "schema.run_manifest.exists": true,
+      "consistency.row_count_equal": true,
+      "consistency.detection_ids_match": true,
+      "consistency.fragment_ids_unique": true,
+      "consistency.detection_id_unique_in_boxes": true,
+      "consistency.detection_id_unique_in_identified": true,
+      "consistency.no_unknown_fragment_references": true,
+      "consistency.no_field_drift": true,
+      "timestamps.missing_timestamp_s_zero": true,
+      "timestamps.non_numeric_timestamp_s_zero": true,
+      "timestamps.negative_timestamp_s_zero": true,
+      "timestamps.non_finite_timestamp_s_zero": true,
+      "timestamps.timestamp_not_equal_to_frame_divided_by_fps_zero": true,
+      "timestamps.non_monotonic_within_same_frame_zero": true,
+      "fragments.no_inverted": true,
+      "fragments.ids_unique": true,
+      "detection_accounting.valid": true,
+      "identity_association.valid": true,
+      "render.opened": true,
+      "render.frames_match": true,
+      "render.geometry_matches_source": true
+    },
+    "failures": [],
+    "require_render": true,
+    "note": "Structural acceptance only; not tracking or identity accuracy."
+  }
+}

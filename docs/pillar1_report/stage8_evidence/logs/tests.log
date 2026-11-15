@@ -1,0 +1,45 @@
+﻿.........s................................................................s..................................................................................................................................................................................................................................C:\Users\lokes\Desktop\capstone\football-game-analysis\run.py:986: ResourceWarning: unclosed file <_io.TextIOWrapper name='C:\\Users\\lokes\\AppData\\Local\\Temp\\tmpoh_evrcu\\no_review\\boxes.jsonl' mode='r' encoding='cp1252'>
+  boxes_rows = sum(1 for line in samples_path.open())
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\lokes\Desktop\capstone\football-game-analysis\run.py:987: ResourceWarning: unclosed file <_io.TextIOWrapper name='C:\\Users\\lokes\\AppData\\Local\\Temp\\tmpoh_evrcu\\no_review\\identified_boxes.jsonl' mode='r' encoding='cp1252'>
+  identified_rows = sum(1 for line in (out/'identified_boxes.jsonl').open())
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+Pair evaluation written: C:\Users\lokes\AppData\Local\Temp\tmpgck0338b\reports\pair_evaluation.json
+Identity association: review=not_supplied groups=0 associated=0 unresolved=3 cross_file_valid=True
+Team classification: fit=False fingerprint=None fragments={'UNKNOWN': 3} detections={'UNKNOWN': 165}
+WARNING: no team clusters were fitted: 0 balanced fitting crops < min_samples 12; 0 crops were collected in total
+C:\Users\lokes\Desktop\capstone\football-game-analysis\run.py:986: ResourceWarning: unclosed file <_io.TextIOWrapper name='C:\\Users\\lokes\\AppData\\Local\\Temp\\tmpoh_evrcu\\with_review\\boxes.jsonl' mode='r' encoding='cp1252'>
+  boxes_rows = sum(1 for line in samples_path.open())
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\lokes\Desktop\capstone\football-game-analysis\run.py:987: ResourceWarning: unclosed file <_io.TextIOWrapper name='C:\\Users\\lokes\\AppData\\Local\\Temp\\tmpoh_evrcu\\with_review\\identified_boxes.jsonl' mode='r' encoding='cp1252'>
+  identified_rows = sum(1 for line in (out/'identified_boxes.jsonl').open())
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+Finished: 3 fragments. Outputs in C:\Users\lokes\AppData\Local\Temp\tmpoh_evrcu\no_review
+Identity association: review=applied groups=1 associated=2 unresolved=1 cross_file_valid=True
+Team classification: fit=False fingerprint=None fragments={'UNKNOWN': 3} detections={'UNKNOWN': 165}
+WARNING: no team clusters were fitted: 0 balanced fitting crops < min_samples 12; 0 crops were collected in total
+..usage: run.py [-h] --video VIDEO [--roster ROSTER] [--out OUT]
+              [--weights WEIGHTS] [--device DEVICE] [--ocr]
+              [--sample-every SAMPLE_EVERY]
+              [--min-observations MIN_OBSERVATIONS]
+              [--max-observations MAX_OBSERVATIONS]
+              [--fragment-gap FRAGMENT_GAP]
+              [--max-fragment-seconds MAX_FRAGMENT_SECONDS]
+              [--threshold THRESHOLD] [--margin MARGIN]
+              [--max-frames MAX_FRAMES] [--render]
+              [--team-sample-every TEAM_SAMPLE_EVERY]
+              [--team-max-crops-per-fragment TEAM_MAX_CROPS_PER_FRAGMENT]
+              [--team-max-crops-per-fit-fragment TEAM_MAX_CROPS_PER_FIT_FRAGMENT]
+              [--team-min-votes TEAM_MIN_VOTES]
+              [--team-min-majority TEAM_MIN_MAJORITY]
+              [--team-candidate-mode {off,legacy,multi}]
+              [--team-candidate-action {flag,reject}]
+              [--team-calibration TEAM_CALIBRATION] [--team-save-crops]
+              [--identity-review IDENTITY_REVIEW]
+run.py: error: --identity-review must name an existing review file
+.........................................................................................................................................
+----------------------------------------------------------------------
+Ran 440 tests in 27.461s
+System.Management.Automation.RemoteException
+OK (skipped=2)
+Finished: 3 fragments. Outputs in C:\Users\lokes\AppData\Local\Temp\tmpoh_evrcu\with_review
