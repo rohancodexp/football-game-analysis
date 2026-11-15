@@ -10,8 +10,8 @@ Task 1.2 (output-contract normalization) only:
 Nothing in this module classifies, clusters or associates anything. It only
 defines, normalizes and validates the output contract.
 
-``person_uid`` is declared RESERVED: it is not emitted by any current stage
-and validators must not require it.
+``person_uid`` remains reserved in schema 1.0. Explicit schema 1.1 enriched
+records carry nullable anonymous identity and association provenance.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, Optional, Sequence
 
 SCHEMA_VERSION = "1.0"
+ENRICHED_SCHEMA_VERSION = "1.1"
 
 # Per-frame detection accounting (Stage 2). A separate version and file from the
 # detection/identity contract above; it never carries identity fields.
@@ -148,9 +149,29 @@ DETECTION_IDENTITY_FIELDS: tuple[str, ...] = (
     "identification_reason",
 )
 
-# Reserved identity fields: declared for the roadmap, never validated as
-# required by any current stage.
+# Reserved in the legacy contract.
 RESERVED_FIELDS: frozenset[str] = frozenset({"person_uid"})
+
+PERSON_UID_PATTERN = re.compile(r"^P[0-9a-f]{32}$")
+ENRICHED_IDENTITY_FIELDS: tuple[str, ...] = (
+    "person_uid",
+    "association_status",
+    "association_reason",
+    "association_method",
+)
+ENRICHED_FIELD_REGISTRY = {
+    **FIELD_REGISTRY,
+    'player_id': (_STR, frozenset({'detection', 'fragment'}), 'roster ID or UNK; unchanged by anonymous association'),
+    'team_id': (_STR, frozenset({'detection', 'fragment'}), 'TEAM_A, TEAM_B or UNKNOWN'),
+    "schema_version": (_STR, frozenset({"detection", "fragment"}), "explicit enriched contract version 1.1"),
+    "person_uid": ((str, type(None)), frozenset({"detection", "fragment"}),
+                   "run-scoped anonymous association UID: P plus 32 lowercase hex characters, or null"),
+    "association_status": (_STR, frozenset({"detection", "fragment"}), "associated or unresolved"),
+    "association_reason": (_STR, frozenset({"detection", "fragment"}), "nonempty association decision reason"),
+    "association_method": (_STR, frozenset({"detection", "fragment"}),
+                           "human_reviewed_pair_clique when associated; abstain when unresolved"),
+    "team_score": (_NUM, frozenset({"detection"}), "finite final team score in [0,1]; UNKNOWN requires zero"),
+}
 
 
 class SchemaError(ValueError):
@@ -398,6 +419,48 @@ def validate_fields(
     return errors, warnings
 
 
+def validate_identity_fields(record: dict[str, Any], context: str = "record") -> list[str]:
+    """Validate explicit 1.1 identity fields on a detection or fragment."""
+    if not isinstance(record, dict):
+        return [f"{context}: record is not a mapping"]
+
+    errors: list[str] = []
+    version = record.get("schema_version")
+    if not isinstance(version, str) or version != ENRICHED_SCHEMA_VERSION:
+        errors.append(f"{context}: schema_version must be {ENRICHED_SCHEMA_VERSION!r}, got {version!r}")
+    for name in ENRICHED_IDENTITY_FIELDS:
+        if name not in record:
+            errors.append(f"{context}: missing required field '{name}'")
+
+    uid = record.get("person_uid")
+    if uid is not None and (not isinstance(uid, str) or not PERSON_UID_PATTERN.fullmatch(uid)):
+        errors.append(f"{context}: person_uid must match {PERSON_UID_PATTERN.pattern} or be null")
+
+    status = record.get("association_status")
+    if "association_status" in record and status not in ("associated", "unresolved"):
+        errors.append(f"{context}: association_status must be associated or unresolved")
+    if status == "associated":
+        if "person_uid" in record and uid is None:
+            errors.append(f"{context}: associated person_uid must not be null")
+    elif status == "unresolved" and uid is not None:
+        errors.append(f"{context}: unresolved person_uid must be null")
+
+    if "association_method" in record:
+        method = record["association_method"]
+        if method not in ("human_reviewed_pair_clique", "abstain"):
+            errors.append(f"{context}: association_method must be human_reviewed_pair_clique or abstain")
+        elif status == "associated" and method != "human_reviewed_pair_clique":
+            errors.append(f"{context}: associated association_method must be human_reviewed_pair_clique")
+        elif status == "unresolved" and method != "abstain":
+            errors.append(f"{context}: unresolved association_method must be abstain")
+
+    if "association_reason" in record:
+        reason = record["association_reason"]
+        if not isinstance(reason, str) or not reason.strip():
+            errors.append(f"{context}: association_reason must be a nonempty string")
+    return errors
+
+
 def validate_detection_record(
     row: dict[str, Any],
     *,
@@ -436,13 +499,13 @@ def validate_detection_record(
 
     if "team_id" in row:
         team = row["team_id"]
-        if team is None or team in LEGACY_TEAM_SENTINELS:
+        if team is None or (isinstance(team, str) and team in LEGACY_TEAM_SENTINELS):
             message = f"{context}: team_id {team!r} is the legacy player sentinel; normalize to {TEAM_UNKNOWN!r}"
             if strict:
                 errors.append(message)
             else:
                 warnings.append(message)
-        elif not is_canonical_team_label(team):
+        elif isinstance(team, str) and not is_canonical_team_label(team):
             # Roster club labels are preserved verbatim and only warn: coercing
             # them into TEAM_A/TEAM_B would fabricate a classification result.
             message = f"{context}: team_id {team!r} is outside the anonymous team vocabulary"
@@ -458,7 +521,21 @@ def validate_detection_record(
         if alias in row and canonical not in row:
             warnings.append(f"{context}: deprecated field '{alias}' should be '{canonical}'")
 
-    if "person_uid" in row:
+    version = row.get("schema_version", SCHEMA_VERSION)
+    if not isinstance(version, str) or version not in (SCHEMA_VERSION, ENRICHED_SCHEMA_VERSION):
+        errors.append(f"{context}: unsupported schema_version {version!r}")
+    elif version == ENRICHED_SCHEMA_VERSION:
+        errors.extend(validate_identity_fields(row, context=context))
+        if not is_canonical_team_label(row.get('team_id')):
+            errors.append(f'{context}: enriched team_id must use the anonymous team vocabulary')
+        if not isinstance(row.get('player_id'), str) or not row['player_id'].strip():
+            errors.append(f'{context}: enriched player_id must be a nonempty roster ID or UNK')
+        score = row.get("team_score")
+        if isinstance(score, bool) or not isinstance(score, (int, float)) or not 0 <= score <= 1:
+            errors.append(f"{context}: team_score must be a finite number in [0,1], got {score!r}")
+        elif row.get("team_id") == TEAM_UNKNOWN and score != 0:
+            errors.append(f"{context}: UNKNOWN team_id requires team_score zero")
+    elif "person_uid" in row:
         errors.append(f"{context}: person_uid is reserved and must not be emitted yet")
 
     return errors, warnings
@@ -536,11 +613,12 @@ def validate_rows(
     *,
     strict: bool = False,
 ) -> dict[str, Any]:
-    """Validate a batch of detection records and summarize the result."""
+    """Validate one artifact; report row_schema_versions, treating absent versions as 1.0."""
     all_errors: list[str] = []
     all_warnings: list[str] = []
     team_counts: Counter[str] = Counter()
     player_counts: Counter[str] = Counter()
+    row_versions: list[Any] = []
 
     for index, row in enumerate(rows):
         errors, warnings = validate_detection_record(
@@ -553,9 +631,17 @@ def validate_rows(
         if isinstance(row, dict):
             team_counts[str(row.get("team_id", "<absent>"))] += 1
             player_counts[str(row.get("player_id", "<absent>"))] += 1
+            version = row.get("schema_version", SCHEMA_VERSION)
+            if version not in row_versions:
+                row_versions.append(version)
+
+    row_versions.sort(key=repr)
+    if len(row_versions) > 1:
+        all_errors.append(f"mixed schema versions in one artifact: {row_versions!r}")
 
     return {
         "schema_version": SCHEMA_VERSION,
+        "row_schema_versions": row_versions,
         "level": "strict" if strict else "required",
         "records": len(rows),
         "valid": not all_errors,
@@ -747,10 +833,14 @@ def validate_accounting_rows(
     }
 
 
-def schema_descriptor() -> dict[str, Any]:
-    """Machine-readable description of the contract, for manifests and reports."""
-    return {
-        "schema_version": SCHEMA_VERSION,
+def schema_descriptor(version: str = SCHEMA_VERSION) -> dict[str, Any]:
+    """Describe a supported contract without changing the legacy default."""
+    if not isinstance(version, str) or version not in (SCHEMA_VERSION, ENRICHED_SCHEMA_VERSION):
+        raise SchemaError(f"Unsupported schema_version {version!r}")
+    enriched = version == ENRICHED_SCHEMA_VERSION
+    registry = ENRICHED_FIELD_REGISTRY if enriched else FIELD_REGISTRY
+    descriptor = {
+        "schema_version": version,
         "detection_id_format": "D{frame:06d}_{kind}{key:06d}_{seq:03d}, kind in T|N",
         "detection_id_pattern": DETECTION_ID_PATTERN.pattern,
         "detection_id_key_kinds": {
@@ -776,9 +866,18 @@ def schema_descriptor() -> dict[str, Any]:
         },
         "fields": {
             name: {"types": [t.__name__ for t in types], "description": note}
-            for name, (types, _required_in, note) in FIELD_REGISTRY.items()
+            for name, (types, _required_in, note) in registry.items()
         },
     }
+    if enriched:
+        descriptor["detection_identity_fields"].extend((*ENRICHED_IDENTITY_FIELDS, "team_score"))
+        descriptor["reserved_fields"] = sorted(RESERVED_FIELDS.difference(ENRICHED_IDENTITY_FIELDS))
+        descriptor["person_uid_pattern"] = PERSON_UID_PATTERN.pattern
+        descriptor["required_identity_fields"] = ["schema_version", *ENRICHED_IDENTITY_FIELDS]
+        descriptor["required_detection_fields"] = [
+            name for name, (_, required_in, _) in registry.items() if "detection" in required_in
+        ]
+    return descriptor
 
 
 def schema_descriptor_json(*, indent: int = 2) -> str:

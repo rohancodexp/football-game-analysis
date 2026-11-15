@@ -17,6 +17,8 @@ from typing import Iterable, Optional, Sequence
 import cv2
 import numpy as np
 
+from team_reliability import measure_separation
+
 
 UNKNOWN = "UNKNOWN"
 TEAM_A = "TEAM_A"
@@ -407,6 +409,7 @@ class TeamPrediction:
     distance: Optional[float] = None
     reason: str = "not_fitted"
     candidate: Optional[RoleCandidate] = None
+    margin: Optional[float] = None
 
 
 class TeamAppearanceClassifier:
@@ -539,6 +542,12 @@ class TeamAppearanceClassifier:
         )
 
     def fit(self, torso_crops: Iterable[np.ndarray], crop_ids: Optional[Sequence] = None) -> dict:
+        # A failed re-fit must not leave a previous proposal model available.
+        self.centres = None
+        self.radii = None
+        self.label_order = None
+        self._cluster_to_team = {}
+        self.fit_report = {}
         crops = list(torso_crops)
         ids = list(crop_ids) if crop_ids is not None else None
         if ids is not None and len(ids) != len(crops):
@@ -604,6 +613,13 @@ class TeamAppearanceClassifier:
         centre_keys = sorted(tuple(np.round(centres[k], 8).tolist()) for k in range(2))
         fingerprint = hashlib.sha256(repr(centre_keys).encode("utf-8")).hexdigest()[:16]
 
+        # Alternate initializations measure stability only; never select the fit.
+        alternate_labels = [
+            self._kmeans(x, self.max_iterations, self.random_state + offset)[0]
+            for offset in (1, 2)
+        ]
+        separation = measure_separation(x, labels, centres, radii, alternate_labels)
+
         self.centres = centres
         self.radii = radii
         self.label_order = (TEAM_A, TEAM_B)
@@ -625,6 +641,7 @@ class TeamAppearanceClassifier:
             "anchor_sample_index": int(anchor_sample),
             "anchor_crop_id": ids[anchor_sample] if ids is not None else None,
             "cluster_fingerprint": fingerprint,
+            "separation": separation,
             "outlier_multiplier": self.outlier_multiplier,
             "use_grass_mask": self.use_grass_mask,
             "min_foreground_ratio": self.min_foreground_ratio,
@@ -708,6 +725,7 @@ class TeamAppearanceClassifier:
         distances = np.linalg.norm(self.centres - feature[None, :], axis=1)
         k = int(np.argmin(distances))
         distance = float(distances[k])
+        margin = float(distances[1 - k]) - distance
         radius = float(self.radii[k])
 
         candidate = legacy_candidate
@@ -726,6 +744,7 @@ class TeamAppearanceClassifier:
                     distance=distance,
                     reason="role_candidate_rejected",
                     candidate=candidate,
+                    margin=margin,
                 )
 
         if distance > radius:
@@ -735,6 +754,7 @@ class TeamAppearanceClassifier:
                 distance=distance,
                 reason="appearance_outlier",
                 candidate=candidate,
+                margin=margin,
             )
 
         confidence = float(np.clip(1.0 - distance / max(radius, 1e-8), 0.0, 1.0))
@@ -744,4 +764,5 @@ class TeamAppearanceClassifier:
             distance=distance,
             reason="nearest_team_appearance_cluster",
             candidate=candidate,
+            margin=margin,
         )
